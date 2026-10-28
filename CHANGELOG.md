@@ -9,6 +9,7 @@ All notable changes to this project are documented in this file. Versions follow
 - README animation (`docs/demo.gif`), rendered from the real window by an opt-in demo script (`CONFIG+=demo` / `DEMO=1 ./build.sh`, `velox --demo DIR`) and the manual `Demo` workflow. Release and default builds do not contain it.
 
 ### Changed
+- New minimal logo: a single blue V on a dark tile.
 - The test suite and `--self-test` are now a build option (`CONFIG+=selftest`); `build.sh` enables it by default and `SELFTEST=0` (used by the PKGBUILDs) produces a production binary without Qt Test.
 - The version is defined once in `velox.pro`; `scripts/check-version.sh` checks it against the PKGBUILD, AppStream metadata and CHANGELOG.
 - PKGBUILD builds out of tree; added `packaging/aur/PKGBUILD` for release-tarball builds.
