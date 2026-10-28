@@ -15,6 +15,16 @@ All notable changes to this project are documented in this file. Versions follow
 - Tag-triggered release workflow that publishes a source tarball with notes from this changelog.
 ### Fixed
 - 16 languages (ActionScript, ASP, AutoIt, Baan C, COBOL, Fortran 77, Go, JavaScript (js), JSON5, JSP, NFO, PHP, PostScript, RC, Scheme, Swift) had no matching Lexilla lexer and rendered as plain text; they now map to the correct lexers (NFO stays plain text). JSON5 allows comments. A self-test guards against future regressions.
+### Added
+- Files that are not valid UTF-8 can be reopened with a chosen legacy encoding; the encoding lists now also include ISO-8859-15, EUC-KR, Big5 and Windows-1251.
+
+### Fixed
+- Auto-indent now also works for CR-only documents.
+- Completion is triggered by non-ASCII letters.
+- Find in files no longer cuts a UTF-8 character in half when shortening long result lines.
+
+### Documentation
+- Documented what atomic saves do and do not preserve (ownership, ACLs and extended attributes).
 
 ## [0.1.0] - 2026-10-28
 

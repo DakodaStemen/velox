@@ -33,7 +33,8 @@ size and modification time, and converts back on save.
 - the text cannot be represented in the chosen encoding.
 
 Writes go through `QSaveFile`: a temporary file that is atomically renamed over the target.
-Symlinks are resolved first so the link itself is preserved.
+Symlinks are resolved first so the link itself is preserved, and permission bits are kept.
+Because the temporary file is renamed over the target, ownership, ACLs and extended attributes are not preserved.
 
 ## Search
 
