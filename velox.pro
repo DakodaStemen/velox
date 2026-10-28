@@ -1,10 +1,11 @@
 QT += core gui widgets xml network testlib
+greaterThan(QT_MAJOR_VERSION, 5): QT += core5compat
 CONFIG += c++17 release
 TEMPLATE = app
 TARGET = velox
 DESTDIR = bin
-SOURCES += src/main.cpp src/document.cpp src/window.cpp tests/integration.cpp tests/edge_cases.cpp
-HEADERS += src/document.h src/window.h
+SOURCES += src/main.cpp src/document.cpp src/window.cpp src/udleditor.cpp tests/integration.cpp tests/edge_cases.cpp tests/demo.cpp
+HEADERS += src/document.h src/window.h src/udleditor.h
 RESOURCES += resources.qrc
 INCLUDEPATH += src vendor/scintilla/include vendor/scintilla/src vendor/scintilla/qt/ScintillaEditBase vendor/lexilla/include
 # Both engines are linked statically so the installed binary is self-contained.

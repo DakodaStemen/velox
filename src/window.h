@@ -11,8 +11,23 @@ struct Language {
   QList<QByteArray> keywords;
   QDomElement udl; // set for user-defined (UDL) languages
 };
+// Files above this size open without highlighting, folding or the outline.
+constexpr qint64 largeFileSize = 32 * 1024 * 1024;
+// Scintilla's text copies here use int lengths, so stay well below 2 GiB.
+constexpr qint64 maxFileSize = 1024LL * 1024 * 1024;
 QString dataPath(const QString &file);
 QString configPath(const QString &file = {});
+// User-adjustable options, stored in settings.ini and edited in the
+// Preferences dialog.
+struct Preferences {
+  QString font = "DejaVu Sans Mono";
+  int fontSize = 11, tabWidth = 4;
+  bool spaces = true, lineNumbers = true, caretLine = true, wrap = false,
+       whitespace = false, autoIndent = true, completion = true,
+       trimOnSave = false, finalNewline = false;
+  void load(const QSettings &s);
+  void store(QSettings &s) const;
+};
 class EditorTab : public QWidget {
 public:
   explicit EditorTab(QWidget *parent = nullptr);
@@ -24,6 +39,7 @@ public:
   QByteArray text() const;
   void setText(const QByteArray &text, bool dirty = false);
   bool metadataDirty = false;
+  bool large = false; // no highlighting, folding or outline; see largeFileSize
   bool dirty() const;
   void toggleSplit();
   QString title() const;
@@ -38,6 +54,19 @@ public:
   bool closeTab(int index);
   void applyLanguage(EditorTab *tab, const QString &language);
   void applyTheme(EditorTab *tab);
+  void reloadLanguages();
+  void editUserLanguage(const QString &name = {});
+  void applyPreferences(EditorTab *tab);
+  void showPreferences();
+  Preferences prefs;
+  bool openSpec(const QString &spec); // "path", "path:line" or "path:line:col"
+  void trimTrailingWhitespace(EditorTab *tab);
+  void ensureFinalNewline(EditorTab *tab);
+  bool toggleComment();
+  enum SortOrder { Ascending, Descending, IgnoreCase };
+  int sortLines(SortOrder order);
+  int removeDuplicateLines();
+  void joinLines();
   bool find(bool backwards = false);
   int replaceAll();
   int markAll();
@@ -51,7 +80,7 @@ public:
   QTabWidget *tabs;
   QLineEdit *query, *replacement, *folder, *filters;
   QCheckBox *matchCase, *wholeWord, *regex;
-  QComboBox *languageChoice, *encodingChoice, *eolChoice, *themeChoice;
+  QComboBox *filesEncoding, *languageChoice, *encodingChoice, *eolChoice, *themeChoice;
   QMap<QString, Language> languages;
   QString sessionPath;
   bool testing;

@@ -5,7 +5,8 @@ how to submit them.
 
 ## Getting started
 
-Requirements: Qt 5.15 (`qt5-base`, `qt5-svg`), a C++17 compiler and `make`.
+Requirements: Qt 5.15 (`qt5-base`, `qt5-svg`) or Qt 6 (`qt6-base`, `qt6-svg`; build with `QT=6`), a C++17
+compiler and `make`.
 
 ```sh
 ./build.sh
@@ -13,8 +14,12 @@ Requirements: Qt 5.15 (`qt5-base`, `qt5-svg`), a C++17 compiler and `make`.
 QT_QPA_PLATFORM=offscreen ./run.sh --self-test
 ```
 
-After the first build, `make -C build/app` rebuilds only the application. [docs/architecture.md](docs/architecture.md)
+`SANITIZE=1 ./build.sh` builds with AddressSanitizer and UBSan; run the self-test with
+`ASAN_OPTIONS=detect_leaks=0` to check for memory errors. After the first build, `make -C build/app` rebuilds only the application. [docs/architecture.md](docs/architecture.md)
 explains where things live.
+
+`docs/make-demo.sh` regenerates `docs/demo.gif` (needs ffmpeg); update the scenes in `tests/demo.cpp` when you
+add a user-visible feature.
 
 ## Reporting bugs and requesting features
 

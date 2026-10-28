@@ -1,9 +1,37 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 The Velox Authors
 #include "document.h"
+#include <QTextCodec>
 #include <sys/stat.h>
 static QByteArray hash(const QByteArray &b) {
   return QCryptographicHash::hash(b, QCryptographicHash::Sha256);
+}
+// Qt 5's UTF-32 codec writes a stray NUL per surrogate pair, so UTF-32 is
+// converted here instead.
+static bool decodeUtf32(const QByteArray &body, bool little, QString &out) {
+  if (body.size() % 4)
+    return false;
+  QVector<uint> units;
+  units.reserve(body.size() / 4);
+  for (int i = 0; i < body.size(); i += 4) {
+    const uchar *b = reinterpret_cast<const uchar *>(body.constData()) + i;
+    const uint c = little ? uint(b[0]) | b[1] << 8 | b[2] << 16 | uint(b[3]) << 24
+                          : uint(b[3]) | b[2] << 8 | b[1] << 16 | uint(b[0]) << 24;
+    if (c > 0x10ffff || (c >= 0xd800 && c <= 0xdfff))
+      return false;
+    units << c;
+  }
+  out = QString::fromUcs4(units.constData(), units.size());
+  return true;
+}
+static QByteArray encodeUtf32(const QString &text, bool little) {
+  const QVector<uint> units = text.toUcs4();
+  QByteArray out;
+  out.reserve(units.size() * 4);
+  for (uint c : units)
+    for (int i = 0; i < 4; ++i)
+      out += char((c >> (little ? 8 * i : 8 * (3 - i))) & 0xff);
+  return out;
 }
 bool DocumentData::read(const QString &name, DocumentData &out, QString &error,
                         const QString &fallback) {
@@ -30,13 +58,18 @@ bool DocumentData::read(const QString &name, DocumentData &out, QString &error,
   result.path = QFileInfo(name).absoluteFilePath();
   result.exists = true;
   result.diskHash = hash(raw);
-  if (raw.startsWith(QByteArray::fromHex("fffe0000")) ||
-      raw.startsWith(QByteArray::fromHex("0000feff"))) {
-    error = "UTF-32 files are not supported yet. Convert a copy to UTF-8 "
-            "before opening.";
-    return false;
-  }
-  if (raw.startsWith(QByteArray::fromHex("efbbbf")))
+  // UTF-32 BOMs must be tested before UTF-16LE, whose BOM is their prefix.
+  const bool utf32le = raw.startsWith(QByteArray::fromHex("fffe0000")),
+             utf32be = raw.startsWith(QByteArray::fromHex("0000feff"));
+  if (utf32le || utf32be) {
+    if (raw.size() % 4) {
+      error = "This UTF-32 file is truncated (its size is not a multiple of "
+              "four bytes).";
+      return false;
+    }
+    result.encoding = utf32le ? "UTF-32LE" : "UTF-32BE";
+    result.bom = raw.left(4);
+  } else if (raw.startsWith(QByteArray::fromHex("efbbbf")))
     result.bom = raw.left(3);
   else if (raw.startsWith(QByteArray::fromHex("fffe"))) {
     result.encoding = "UTF-16LE";
@@ -46,18 +79,26 @@ bool DocumentData::read(const QString &name, DocumentData &out, QString &error,
     result.bom = raw.left(2);
   } else if (!fallback.isEmpty())
     result.encoding = fallback;
-  QTextCodec *codec = QTextCodec::codecForName(result.encoding.toLatin1());
-  if (!codec) {
-    error = "Unknown encoding: " + result.encoding;
-    return false;
-  }
-  QTextCodec::ConverterState state(QTextCodec::IgnoreHeader);
   QByteArray body = raw.mid(result.bom.size());
-  QString text = codec->toUnicode(body.constData(), body.size(), &state);
-  if (state.invalidChars || state.remainingChars) {
-    error = "This file is not valid " + result.encoding +
-            ". Choose a legacy encoding to open it without replacing bytes.";
-    return false;
+  QString text;
+  if (result.encoding.startsWith("UTF-32")) {
+    if (!decodeUtf32(body, result.encoding == "UTF-32LE", text)) {
+      error = "This file is not valid " + result.encoding + ".";
+      return false;
+    }
+  } else {
+    QTextCodec *codec = QTextCodec::codecForName(result.encoding.toLatin1());
+    if (!codec) {
+      error = "Unknown encoding: " + result.encoding;
+      return false;
+    }
+    QTextCodec::ConverterState state(QTextCodec::IgnoreHeader);
+    text = codec->toUnicode(body.constData(), body.size(), &state);
+    if (state.invalidChars || state.remainingChars) {
+      error = "This file is not valid " + result.encoding +
+              ". Choose a legacy encoding to open it without replacing bytes.";
+      return false;
+    }
   }
   if (text.contains(QChar(0))) {
     error = "This appears to be a binary file (contains NUL characters).";
@@ -108,19 +149,23 @@ bool DocumentData::write(const QByteArray &text, const QString &name,
       return false;
     }
   }
-  QTextCodec *codec = QTextCodec::codecForName(encoding.toLatin1());
-  if (!codec) {
-    error = "Unknown encoding: " + encoding;
-    return false;
-  }
   QString unicode = QString::fromUtf8(text);
-  QTextCodec::ConverterState state(QTextCodec::IgnoreHeader);
-  QByteArray bytes =
-      codec->fromUnicode(unicode.constData(), unicode.size(), &state);
-  if (state.invalidChars) {
-    error = "Some characters cannot be represented in " + encoding +
-            ". Select UTF-8 or UTF-16 before saving.";
-    return false;
+  QByteArray bytes;
+  if (encoding.startsWith("UTF-32"))
+    bytes = encodeUtf32(unicode, encoding == "UTF-32LE");
+  else {
+    QTextCodec *codec = QTextCodec::codecForName(encoding.toLatin1());
+    if (!codec) {
+      error = "Unknown encoding: " + encoding;
+      return false;
+    }
+    QTextCodec::ConverterState state(QTextCodec::IgnoreHeader);
+    bytes = codec->fromUnicode(unicode.constData(), unicode.size(), &state);
+    if (state.invalidChars) {
+      error = "Some characters cannot be represented in " + encoding +
+              ". Select UTF-8 or UTF-16 before saving.";
+      return false;
+    }
   }
   bytes.prepend(bom);
   QSaveFile file(destination);
