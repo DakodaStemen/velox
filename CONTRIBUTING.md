@@ -41,13 +41,6 @@ problem depends on file contents or encoding.
 - `vendor/` holds third-party code. Avoid changing it. When you must, keep the original headers,
   mark the change, and record it in `THIRD_PARTY_NOTICES.md`.
 
-## Regenerating the README animation
-
-`docs/demo.gif` is rendered from the real window by `tests/demo.cpp`, compiled only with
-`DEMO=1 SELFTEST=0 ./build.sh` (`CONFIG+=demo`); release builds never contain it. Edit the scenes there,
-then run the **Demo** workflow (Actions, Run workflow) and commit the `docs/demo.gif` artifact, or locally
-run `docs/make-demo.sh` (needs ffmpeg and the JetBrains Mono and Inter fonts).
-
 ## Commit messages
 
 Use the imperative mood ("Add find in files", not "Added…"), keep the subject under about 70

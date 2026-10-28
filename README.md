@@ -10,10 +10,6 @@
   <a href="https://github.com/DakodaStemen/velox/actions/workflows/ci.yml"><img src="https://github.com/DakodaStemen/velox/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
 </p>
 
-<p align="center"><img src="docs/demo.gif" alt="Animated demo of Velox: typing with syntax highlighting, regex find, multiple cursors, line tools, bookmarks, find in files, split view and theme switching" width="860"></p>
-
-<p align="center"><sub>Real window, real editing: typing, regex find, multi-cursor, bookmarks, find in files, split view and themes.</sub></p>
-
 ## Features
 
 - **Tabs and split views.** Two views of the same document, drag and drop, recent files, a folder sidebar and a document outline.
