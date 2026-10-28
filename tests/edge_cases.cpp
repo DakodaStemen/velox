@@ -649,7 +649,7 @@ private slots:
   void backupSizeCapRejectsAbsurdLengths() {
     DocumentData d;
     d.path = "/tmp/x";
-    auto good = d.json("hello\n", true);
+    auto good = d.json(true, "hello\n");
     QCOMPARE(DocumentData::fromJson(good).utf8, QByteArray("hello\n"));
     for (quint32 declared : {0x7fffffffu, 0x40000001u, 0xffffffffu}) {
       QByteArray packed(8, '\0');
