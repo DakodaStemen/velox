@@ -1,6 +1,7 @@
-# Build from this checkout: cd packaging && makepkg -si
+# In-tree build from the current checkout:  cd packaging && makepkg -si
+# For release-tarball builds (AUR style) see aur/PKGBUILD.
 pkgname=velox
-pkgver=0.1.0
+pkgver=0.1.0   # keep in sync with VERSION in velox.pro (scripts/check-version.sh)
 pkgrel=1
 pkgdesc="Fast native text and code editor built on Scintilla and Lexilla"
 url='https://github.com/DakodaStemen/velox'
@@ -9,14 +10,26 @@ license=('GPL-3.0-or-later')
 depends=('qt5-base' 'qt5-svg')
 makedepends=('make' 'gcc')
 
-build() {
-  cd "$startdir/.."
-  JOBS="$(nproc)" ./build.sh
+prepare() {
+  # Copy the checkout into $srcdir so the build never writes into the working tree.
+  rm -rf "$srcdir/$pkgname"
+  mkdir -p "$srcdir/$pkgname"
+  tar -C "$startdir/.." --exclude=./.git --exclude=./build --exclude=./packaging/src \
+      --exclude=./packaging/pkg --exclude='*.pkg.tar.*' --exclude='*.a' --exclude='*.o' \
+      -cf - . | tar -C "$srcdir/$pkgname" -xf -
 }
 
+build() {
+  cd "$srcdir/$pkgname"
+  SELFTEST=0 PREFIX=/usr JOBS="$(nproc)" ./build.sh
+}
+
+# check(): the production binary is built with SELFTEST=0 and has no --self-test.
+# The test suite runs in CI (a separate selftest build), so it is skipped here.
+
 package() {
-  cd "$startdir/../build/app"
-  make INSTALL_ROOT="$pkgdir" install
-  install -Dm644 "$startdir/../LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
-  install -Dm644 "$startdir/../THIRD_PARTY_NOTICES.md" "$pkgdir/usr/share/licenses/$pkgname/THIRD_PARTY_NOTICES.md"
+  cd "$srcdir/$pkgname"
+  make -C build/app INSTALL_ROOT="$pkgdir" install
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 THIRD_PARTY_NOTICES.md "$pkgdir/usr/share/licenses/$pkgname/THIRD_PARTY_NOTICES.md"
 }
