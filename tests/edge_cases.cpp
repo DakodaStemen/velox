@@ -239,6 +239,42 @@ private slots:
   }
 
   // ---- find in files -------------------------------------------------------
+  void invalidEncodingIsClassified() {
+    QTemporaryDir dir;
+    QString p = dir.filePath("latin1.txt");
+    put(p, QByteArray("caf\xe9\n"));
+    DocumentData d;
+    QString error;
+    ReadError kind = ReadError::None;
+    QVERIFY(!DocumentData::read(p, d, error, {}, &kind));
+    QVERIFY(kind == ReadError::InvalidEncoding);
+    QVERIFY(DocumentData::read(p, d, error, "ISO-8859-1", &kind));
+    QVERIFY(kind == ReadError::None);
+    QCOMPARE(d.utf8, QString::fromUtf8("caf\xc3\xa9\n").toUtf8());
+    put(p, QByteArray("a\0b", 3));
+    QVERIFY(!DocumentData::read(p, d, error, {}, &kind));
+    QVERIFY(kind == ReadError::Other);
+    // Testing-mode windows report instead of prompting, so this cannot block.
+    put(p, QByteArray("caf\xe9\n"));
+    Window w(true);
+    QVERIFY(!w.openFile(p));
+    QVERIFY(w.openFile(p, "Windows-1252"));
+    QVERIFY(w.encodingChoice->findText("Windows-1251") >= 0 ||
+            !QTextCodec::codecForName("Windows-1251"));
+  }
+  void findInFilesSnippetKeepsUtf8Intact() {
+    QTemporaryDir dir;
+    // 299 ASCII bytes then 2-byte characters: the 300-byte cut would fall
+    // inside the first one.
+    QByteArray line = "needle" + QByteArray(293, 'x') + QString::fromUtf8("éééé").toUtf8();
+    put(dir.filePath("u.txt"), line + "\n");
+    Window w(true);
+    w.regex->setChecked(false);
+    w.query->setText("needle");
+    QCOMPARE(w.findInFiles(dir.path(), "*.txt"), 1);
+    const QString shown = w.results->topLevelItem(0)->child(0)->text(0);
+    QVERIFY(!shown.contains(QChar::ReplacementCharacter));
+  }
   void findInFilesEdgeCases() {
     QTemporaryDir dir;
     Window w(true);

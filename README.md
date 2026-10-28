@@ -18,7 +18,7 @@
 - **Syntax highlighting** for about 95 languages, 22 color themes, keyword completion and code folding.
 - **User-defined languages.** Describe a language's keywords, comments, delimiters and colors in a UDL 2.x XML file and Velox highlights it. Markdown definitions are included.
 - **Search.** Regular expression find and replace with captures and zero-width matches (`^`, `$`, lookarounds), *Mark all*, and *Find in files* with a clickable results panel.
-- **Careful file handling.** UTF-8 (with or without BOM), UTF-16 LE/BE and legacy code pages. Saves are atomic, refuse to lose characters or overwrite files changed by other programs, and preserve symlinks, hard links and permissions.
+- **Careful file handling.** UTF-8 (with or without BOM), UTF-16 LE/BE and legacy code pages. Saves are atomic, refuse to lose characters or overwrite files changed by other programs, and preserve permission bits and symlinks (hard-linked files are refused; use Save As). Saves replace the file by atomic rename, so ownership, ACLs and extended attributes are not preserved.
 - **Editing power.** Multiple cursors, rectangular selection (Alt+drag), line ending conversion, bookmarks, macro recording and playback.
 - **Never lose work.** Unsaved text is snapshotted every few seconds and restored after a crash. Changes made to open files by other programs are detected.
 - **One window.** Running `velox file.txt` while Velox is open adds a tab to the existing window.
