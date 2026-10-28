@@ -262,6 +262,19 @@ private slots:
     w.checkDisk();
     QVERIFY(w.statusBar()->currentMessage().startsWith("a.txt changed"));
   }
+  void everyLanguageHasALexer() {
+    Window w(true);
+    // "nfo" is ASCII art with no matching Lexilla lexer; it stays plain text.
+    const QSet<QString> plain{"nfo"};
+    for (const auto &l : w.languages) {
+      if (!l.udl.isNull() || plain.contains(l.name))
+        continue;
+      auto *lexer = CreateLexer(l.lexer.toUtf8().constData());
+      QVERIFY2(lexer, qPrintable("no Lexilla lexer '" + l.lexer +
+                                 "' for language " + l.name));
+      lexer->Release();
+    }
+  }
   void closeCancelKeepsDocument() {
     Window w(true);
     auto *t = w.newDocument("keep me");
