@@ -69,7 +69,7 @@ velox [options] [files…]
 | Ctrl+F2, F2 | Toggle bookmark, next bookmark |
 | Ctrl+D | Duplicate line or selection |
 | Ctrl+Alt+S | Split view |
-| Ctrl+Shift+R / Ctrl+Shift+P | Record / play macro |
+| Ctrl+Shift+R / Ctrl+Shift+P | Record / play macro (editor actions only; menu commands are not recorded) |
 | Alt+Z | Toggle word wrap |
 
 ## Configuration
@@ -78,7 +78,7 @@ velox [options] [files…]
 | --- | --- |
 | Settings | `~/.config/velox/settings.ini` |
 | Your user-defined languages | `~/.config/velox/userDefineLangs/*.xml` |
-| Crash recovery snapshot | `~/.local/share/velox/recovery.json` |
+| Crash recovery snapshot | `~/.local/share/velox/recovery.json` (`recovery-<pid>.json` for `--new-instance` windows) |
 | Bundled languages and themes | `/usr/share/velox` (override with `VELOX_DATA_DIR`) |
 
 **Help → Open configuration folder** creates and opens the configuration directory.
