@@ -518,7 +518,7 @@ void Window::buildMenus() {
   action(f, "&Save", QKeySequence::Save, [this] { save(current()); });
   action(f, "Save &as…", QKeySequence::SaveAs,
          [this] { save(current(), true); });
-  action(f, "Save all", QKeySequence("Ctrl+Shift+S"), [this] {
+  action(f, "Save all", QKeySequence("Ctrl+Alt+Shift+S"), [this] {
     for (int i = 0; i < tabs->count(); ++i) {
       auto *t = static_cast<EditorTab *>(tabs->widget(i));
       if (t->dirty() && !save(t))
