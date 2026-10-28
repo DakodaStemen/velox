@@ -7,6 +7,17 @@
 #include "SciLexer.h"
 #include "BoostRegexSearch.h"
 #include <algorithm>
+// Legacy encodings offered for opening and saving; unavailable codecs are
+// dropped so the list never contains a name Qt cannot convert.
+static QStringList legacyEncodings() {
+  QStringList out;
+  for (const char *n : {"Windows-1252", "ISO-8859-1", "ISO-8859-15",
+                        "Shift-JIS", "GB18030", "EUC-KR", "Big5", "KOI8-R",
+                        "Windows-1251"})
+    if (QTextCodec::codecForName(n))
+      out << n;
+  return out;
+}
 static int colour(const QColor &c) {
   return c.red() | (c.green() << 8) | (c.blue() << 16);
 }
@@ -313,8 +324,8 @@ Window::Window(bool test)
   languageChoice->addItems(languages.keys());
   statusBar()->addPermanentWidget(languageChoice);
   encodingChoice = new QComboBox;
-  encodingChoice->addItems({"UTF-8", "UTF-8 BOM", "UTF-16LE", "UTF-16BE",
-                            "Windows-1252", "ISO-8859-1"});
+  encodingChoice->addItems({"UTF-8", "UTF-8 BOM", "UTF-16LE", "UTF-16BE"});
+  encodingChoice->addItems(legacyEncodings());
   encodingChoice->setToolTip("Encoding used when saving");
   statusBar()->addPermanentWidget(encodingChoice);
   eolChoice = new QComboBox;
@@ -419,8 +430,7 @@ void Window::buildMenus() {
     bool ok;
     QString enc = QInputDialog::getItem(
         this, "File encoding", "Decode as",
-        {"Windows-1252", "ISO-8859-1", "Shift-JIS", "GB18030", "KOI8-R"}, 0,
-        false, &ok);
+        legacyEncodings(), 0, false, &ok);
     if (ok)
       openFile(p, enc);
   });
@@ -741,7 +751,10 @@ EditorTab *Window::newDocument(const QByteArray &text) {
               }
             });
     connect(ed, &ScintillaEditBase::charAdded, this, [this, t, ed](int ch) {
-      if (ch == '\n') {
+      if (ch == '\n' ||
+          (ch == '\r' && ed->send(SCI_GETEOLMODE) == SC_EOL_CR)) {
+        // '\r' only counts in CR mode; in CRLF mode the '\n' that follows
+        // does the indenting, so handling both would indent twice.
         QScopedValueRollback<bool> quiet(suppressMacro, true);
         int line = ed->send(SCI_LINEFROMPOSITION, ed->send(SCI_GETCURRENTPOS));
         if (line > 0) {
@@ -749,8 +762,10 @@ EditorTab *Window::newDocument(const QByteArray &text) {
           ed->send(SCI_SETLINEINDENTATION, line, indent);
           ed->send(SCI_GOTOPOS, ed->send(SCI_GETLINEINDENTPOSITION, line));
         }
-      } else if (ch >= 32 && ch < 127 &&
-                 (QChar(ch).isLetterOrNumber() || ch == '_')) {
+      } else if (ch >= 32 && ch != 127 &&
+                 (ch == '_' || QChar::isLetterOrNumber(uint(ch)))) {
+        // In UTF-8 mode Scintilla reports the decoded code point, so non-ASCII
+        // letters compare correctly via QChar; control chars stay excluded.
         auto pos = ed->send(SCI_GETCURRENTPOS);
         auto start = ed->send(SCI_WORDSTARTPOSITION, pos, 1);
         if (pos - start < 2)
@@ -816,7 +831,23 @@ bool Window::openFile(const QString &path, const QString &fallback) {
   }
   DocumentData d;
   QString error;
-  if (!DocumentData::read(path, d, error, fallback)) {
+  ReadError kind = ReadError::None;
+  if (!DocumentData::read(path, d, error, fallback, &kind)) {
+    // Offer a legacy encoding instead of a dead end. Skipped when a fallback
+    // was already given (no loops) and in testing mode (never block).
+    if (kind == ReadError::InvalidEncoding && fallback.isEmpty() && !testing) {
+      const QStringList choices = legacyEncodings();
+      if (!choices.isEmpty()) {
+        bool ok = false;
+        const QString enc = QInputDialog::getItem(
+            this, "Unsupported encoding",
+            error + "\n\nOpen it using this encoding instead?", choices, 0,
+            false, &ok);
+        if (ok)
+          return openFile(path, enc);
+        return false;
+      }
+    }
     report(error);
     return false;
   }
@@ -1386,8 +1417,12 @@ int Window::findInFiles(const QString &root, const QString &patterns) {
       int line = scanner->send(SCI_LINEFROMPOSITION, pos);
       auto lineStart = scanner->send(SCI_POSITIONFROMLINE, line),
            lineEnd = scanner->send(SCI_GETLINEENDPOSITION, line);
-      auto text = QString::fromUtf8(
-          d.utf8.mid(lineStart, qMin<sptr_t>(lineEnd - lineStart, 300)));
+      sptr_t snipLen = qMin<sptr_t>(lineEnd - lineStart, 300);
+      // Never cut inside a UTF-8 sequence: back off over continuation bytes.
+      while (snipLen > 0 && snipLen < lineEnd - lineStart &&
+             (uchar(d.utf8.at(int(lineStart + snipLen))) & 0xC0) == 0x80)
+        --snipLen;
+      auto text = QString::fromUtf8(d.utf8.mid(lineStart, snipLen));
       if (!fileItem)
         fileItem = new QTreeWidgetItem(results);
       auto *hit = new QTreeWidgetItem(

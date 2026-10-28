@@ -6,7 +6,9 @@ static QByteArray hash(const QByteArray &b) {
   return QCryptographicHash::hash(b, QCryptographicHash::Sha256);
 }
 bool DocumentData::read(const QString &name, DocumentData &out, QString &error,
-                        const QString &fallback) {
+                        const QString &fallback, ReadError *kind) {
+  if (kind)
+    *kind = ReadError::Other;
   // Checked before opening: opening a FIFO blocks, and devices never end.
   struct stat st{};
   if (::stat(QFile::encodeName(name).constData(), &st) == 0 &&
@@ -57,6 +59,8 @@ bool DocumentData::read(const QString &name, DocumentData &out, QString &error,
   if (state.invalidChars || state.remainingChars) {
     error = "This file is not valid " + result.encoding +
             ". Choose a legacy encoding to open it without replacing bytes.";
+    if (kind)
+      *kind = ReadError::InvalidEncoding;
     return false;
   }
   if (text.contains(QChar(0))) {
@@ -66,6 +70,8 @@ bool DocumentData::read(const QString &name, DocumentData &out, QString &error,
   result.utf8 = text.toUtf8();
   result.stamp();
   out = result;
+  if (kind)
+    *kind = ReadError::None;
   return true;
 }
 bool DocumentData::write(const QByteArray &text, const QString &name,
