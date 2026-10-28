@@ -8,6 +8,7 @@
 #include "SciLexer.h"
 #include "BoostRegexSearch.h"
 #include <QScopedValueRollback>
+#include <QTextCodec> // Qt 6: provided by Core5Compat
 #include <algorithm>
 // Legacy encodings offered for opening and saving; unavailable codecs are
 // dropped so the list never contains a name Qt cannot convert.
