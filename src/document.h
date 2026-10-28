@@ -13,11 +13,13 @@ struct DocumentData {
   QByteArray utf8;
   bool exists = false;
   static bool read(const QString &path, DocumentData &out, QString &error,
-                   const QString &fallback = {},
-                   ReadError *kind = nullptr);
+                   const QString &fallback = {}, ReadError *kind = nullptr,
+                   bool computeHash = true);
   bool write(const QByteArray &text, const QString &destination, QString &error,
              bool overwriteChanged = false);
   void stamp();
-  QJsonObject json(const QByteArray &text, bool dirty) const;
+  // `text` is only used (and only needs to be fetched) when needsBackup().
+  bool needsBackup(bool dirty) const { return dirty || path.isEmpty(); }
+  QJsonObject json(bool dirty, const QByteArray &text = {}) const;
   static DocumentData fromJson(const QJsonObject &o);
 };
