@@ -5,6 +5,15 @@
 #include "udleditor.h"
 #include "ILexer.h"
 #include "Lexilla.h"
+#if defined(Q_OS_WIN)
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#else
+#include <cerrno>
+#include <csignal>
+#include <sys/types.h>
+#endif
 #include "SciLexer.h"
 #include "BoostRegexSearch.h"
 #include <QScopedValueRollback>
@@ -39,7 +48,12 @@ QString dataPath(const QString &file) {
     const QString app = QCoreApplication::applicationDirPath();
     for (const QString &dir :
          {qEnvironmentVariable("VELOX_DATA_DIR"), app + "/../share/velox",
-          app + "/../../../share"})
+          app + "/../Resources/share/velox", // macOS app bundle
+          app + "/../../../share",           // qmake build/app/bin
+#ifdef VELOX_SOURCE_SHARE_DIR
+          QStringLiteral(VELOX_SOURCE_SHARE_DIR), // CMake build tree
+#endif
+         })
       if (!dir.isEmpty() && QFile::exists(dir + "/langs.model.xml"))
         return QDir::cleanPath(dir);
     return QDir::cleanPath(app + "/../share/velox");
@@ -218,7 +232,20 @@ QString EditorTab::title() const {
 }
 
 bool Window::pidAlive(qint64 pid) {
-  return pid > 0 && QFileInfo::exists(QString("/proc/%1").arg(pid));
+  if (pid <= 0)
+    return false;
+#if defined(Q_OS_WIN)
+  HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, DWORD(pid));
+  if (!h)
+    return GetLastError() == ERROR_ACCESS_DENIED; // exists, just not ours
+  DWORD code = 0;
+  const bool alive = GetExitCodeProcess(h, &code) && code == STILL_ACTIVE;
+  CloseHandle(h);
+  return alive;
+#else
+  // Signal 0 only checks existence; EPERM means the process exists.
+  return ::kill(pid_t(pid), 0) == 0 || errno == EPERM;
+#endif
 }
 qint64 Window::recoveryPid(const QString &fileName) {
   static const QRegularExpression expr("^recovery-(\\d+)\\.json$");

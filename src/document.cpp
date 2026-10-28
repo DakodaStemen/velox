@@ -2,7 +2,9 @@
 // Copyright (C) 2026 The Velox Authors
 #include "document.h"
 #include <QTextCodec>
+#ifndef Q_OS_WIN
 #include <sys/stat.h>
+#endif
 static QByteArray hash(const QByteArray &b) {
   return QCryptographicHash::hash(b, QCryptographicHash::Sha256);
 }
@@ -39,12 +41,12 @@ bool DocumentData::read(const QString &name, DocumentData &out, QString &error,
   if (kind)
     *kind = ReadError::Other;
   // Checked before opening: opening a FIFO blocks, and devices never end.
-  struct stat st{};
-  if (::stat(QFile::encodeName(name).constData(), &st) == 0 &&
-      !S_ISREG(st.st_mode)) {
-    error = S_ISDIR(st.st_mode) ? "This is a folder, not a file."
-                                : "Only regular files can be opened (this is "
-                                  "a device, pipe or socket).";
+  // QFileInfo::isFile() is true only for regular files on every platform.
+  const QFileInfo probe(name);
+  if (probe.exists() && !probe.isFile()) {
+    error = probe.isDir() ? "This is a folder, not a file."
+                          : "Only regular files can be opened (this is "
+                            "a device, pipe or socket).";
     return false;
   }
   QFile f(name);
@@ -169,19 +171,24 @@ bool DocumentData::write(const QByteArray &text, const QString &name,
     error = "The symbolic link has no existing target. Choose Save As.";
     return false;
   }
-  struct stat st{};
-  const auto native = QFile::encodeName(destination);
-  if (::stat(native.constData(), &st) == 0) {
-    if (!S_ISREG(st.st_mode)) {
+  const QFileInfo target(destination);
+  if (target.exists()) {
+    if (!target.isFile()) {
       error = "The destination is not a regular file.";
       return false;
     }
-    if (st.st_nlink > 1) {
+#ifndef Q_OS_WIN
+    // Hard-link count is only exposed through stat(); Windows saves replace
+    // the file without this concern, so the check is POSIX-only.
+    struct stat st{};
+    if (::stat(QFile::encodeName(destination).constData(), &st) == 0 &&
+        st.st_nlink > 1) {
       error = "This file has hard links. Use Save As to avoid breaking their "
               "shared identity.";
       return false;
     }
-    if (!(st.st_mode & (S_IWUSR | S_IWGRP | S_IWOTH))) {
+#endif
+    if (!target.isWritable()) {
       error = "The destination is read-only.";
       return false;
     }
