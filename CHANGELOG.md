@@ -5,6 +5,15 @@ All notable changes to this project are documented in this file. Versions follow
 
 ## [Unreleased]
 
+### Changed
+- The test suite and `--self-test` are now a build option (`CONFIG+=selftest`); `build.sh` enables it by default and `SELFTEST=0` (used by the PKGBUILDs) produces a production binary without Qt Test.
+- The version is defined once in `velox.pro`; `scripts/check-version.sh` checks it against the PKGBUILD, AppStream metadata and CHANGELOG.
+- PKGBUILD builds out of tree; added `packaging/aur/PKGBUILD` for release-tarball builds.
+
+### Added
+- CI: Ubuntu 24.04 build, ASan + UBSan build (`CONFIG+=sanitizer`), version consistency check, least-privilege permissions, pinned actions and Dependabot updates.
+- Tag-triggered release workflow that publishes a source tarball with notes from this changelog.
+
 ## [0.1.0] - 2026-10-28
 
 First public release.

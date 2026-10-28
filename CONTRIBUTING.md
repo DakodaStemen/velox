@@ -13,6 +13,10 @@ Requirements: Qt 5.15 (`qt5-base`, `qt5-svg`), a C++17 compiler and `make`.
 QT_QPA_PLATFORM=offscreen ./run.sh --self-test
 ```
 
+`build.sh` includes the test suite (needs `qt5-base`'s Qt Test module). `SELFTEST=0 ./build.sh`
+produces the production binary without it, and `SANITIZE=1 ./build.sh` adds ASan + UBSan. Run
+`scripts/check-version.sh` when touching version numbers.
+
 After the first build, `make -C build/app` rebuilds only the application. [docs/architecture.md](docs/architecture.md)
 explains where things live.
 

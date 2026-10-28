@@ -1,9 +1,24 @@
-QT += core gui widgets xml network testlib
+VERSION = 0.1.0
+QT += core gui widgets xml network
 CONFIG += c++17 release
+DEFINES += VELOX_VERSION=\\\"$$VERSION\\\"
 TEMPLATE = app
 TARGET = velox
 DESTDIR = bin
-SOURCES += src/main.cpp src/document.cpp src/window.cpp tests/integration.cpp tests/edge_cases.cpp
+SOURCES += src/main.cpp src/document.cpp src/window.cpp
+
+# Build options (pass to qmake as CONFIG+=...; build.sh sets selftest by default):
+#   selftest  - compile the test suite in and enable `velox --self-test`
+#   sanitizer - AddressSanitizer + UndefinedBehaviorSanitizer
+selftest {
+    QT += testlib
+    DEFINES += VELOX_SELFTEST
+    SOURCES += tests/integration.cpp tests/edge_cases.cpp
+}
+sanitizer {
+    QMAKE_CXXFLAGS += -fsanitize=address,undefined -fno-omit-frame-pointer
+    QMAKE_LFLAGS += -fsanitize=address,undefined
+}
 HEADERS += src/document.h src/window.h
 RESOURCES += resources.qrc
 INCLUDEPATH += src vendor/scintilla/include vendor/scintilla/src vendor/scintilla/qt/ScintillaEditBase vendor/lexilla/include

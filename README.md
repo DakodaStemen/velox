@@ -56,7 +56,7 @@ velox [options] [files…]
 
   --new-instance   open a separate window instead of reusing a running one
   --fresh          start without restoring the previous session
-  --self-test      run the integration test suite in an isolated profile
+  --self-test      run the integration test suite (development builds only, see below)
   --version, --help
 ```
 
@@ -90,6 +90,18 @@ velox [options] [files…]
 ./run.sh [files…]                          # run from the build tree
 QT_QPA_PLATFORM=offscreen ./run.sh --self-test
 ```
+
+`build.sh` compiles the test suite in (`CONFIG+=selftest`) so `--self-test` works. Release and
+packaging builds leave it out, which also drops the Qt Test dependency:
+
+```sh
+SELFTEST=0 ./build.sh                      # production binary, no --self-test
+PREFIX=/usr SELFTEST=0 ./build.sh && make -C build/app INSTALL_ROOT="$PWD/pkg" install
+SANITIZE=1 ./build.sh                      # ASan + UBSan build (CONFIG+=sanitizer)
+```
+
+The version lives in one place, `VERSION` in `velox.pro`; `scripts/check-version.sh` verifies the
+PKGBUILD, AppStream metadata and CHANGELOG agree with it.
 
 See [docs/architecture.md](docs/architecture.md) for a tour of the code.
 
