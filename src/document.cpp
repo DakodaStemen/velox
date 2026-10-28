@@ -78,6 +78,8 @@ bool DocumentData::read(const QString &name, DocumentData &out, QString &error,
     if (state.invalidChars) {
       error = "This file is not valid " + result.encoding +
               ". Choose a legacy encoding to open it without replacing bytes.";
+      if (kind)
+        *kind = ReadError::InvalidEncoding;
       return false;
     }
     if (part.contains(QChar(0))) {
