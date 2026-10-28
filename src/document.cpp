@@ -62,11 +62,19 @@ bool DocumentData::read(const QString &name, DocumentData &out, QString &error,
   const char *body = raw.constData() + result.bom.size();
   const qint64 bodySize = raw.size() - result.bom.size();
   const qint64 chunk = 1 << 20;
+  QString pending;
   if (!isUtf8)
     result.utf8.reserve(int(qMin<qint64>(bodySize * 2, (1 << 30))));
   for (qint64 at = 0; at < bodySize; at += chunk) {
     const int n = int(qMin<qint64>(chunk, bodySize - at));
-    const QString part = codec->toUnicode(body + at, n, &state);
+    QString part = pending + codec->toUnicode(body + at, n, &state);
+    pending.clear();
+    // A surrogate pair may straddle chunks; carry the high half over.
+    if (!isUtf8 && at + n < bodySize && !part.isEmpty() &&
+        part.at(part.size() - 1).isHighSurrogate()) {
+      pending = part.right(1);
+      part.chop(1);
+    }
     if (state.invalidChars) {
       error = "This file is not valid " + result.encoding +
               ". Choose a legacy encoding to open it without replacing bytes.";
@@ -79,7 +87,7 @@ bool DocumentData::read(const QString &name, DocumentData &out, QString &error,
     if (!isUtf8)
       result.utf8 += part.toUtf8();
   }
-  if (state.remainingChars) {
+  if (state.remainingChars || !pending.isEmpty()) {
     error = "This file is not valid " + result.encoding +
             ". Choose a legacy encoding to open it without replacing bytes.";
     if (kind)
