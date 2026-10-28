@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2b3747"/>
+      <stop offset="1" stop-color="#1a2029"/>
+    </linearGradient>
+    <linearGradient id="wing" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f2a35e"/>
+      <stop offset="1" stop-color="#c8562a"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="112" height="112" rx="26" fill="url(#bg)"/>
+  <!-- text lines -->
+  <rect x="26" y="78" width="44" height="6" rx="3" fill="#5d6d82"/>
+  <rect x="26" y="90" width="62" height="6" rx="3" fill="#5d6d82"/>
+  <rect x="26" y="102" width="34" height="6" rx="3" fill="#5d6d82"/>
+  <!-- caret -->
+  <rect x="64" y="100" width="4" height="10" rx="1.5" fill="#e8edf3"/>
+  <!-- velox in flight, facing right -->
+  <path d="M66 50 C58 36 46 26 30 20 C40 32 46 44 52 56 Z" fill="url(#wing)"/>
+  <path d="M30 60 L50 54 L54 62 L26 68 Z" fill="#c8562a"/>
+  <path d="M48 56 C60 46 80 44 92 48 C98 50 100 56 96 60 C86 64 64 64 48 60 Z" fill="#f0a565"/>
+  <path d="M70 52 C66 60 64 70 56 78 C70 72 80 64 82 56 Z" fill="#b84d24"/>
+  <circle cx="92" cy="51" r="8" fill="#f5c08a"/>
+  <circle cx="94" cy="49.5" r="1.8" fill="#1a2029"/>
+  <path d="M99 49 L106 52 L100 55 Z" fill="#e8edf3"/>
+</svg>

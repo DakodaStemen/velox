@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.DakodaStemen.Velox</id>
+  <name>Velox</name>
+  <summary>Fast native text and code editor</summary>
+  <developer id="io.github.dakodastemen">
+    <name>Dakoda Stemen</name>
+  </developer>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <description>
+    <p>Velox is a lightweight, fast tabbed text and code editor. It offers syntax
+    highlighting for nearly a hundred languages, split views, regular expression search and
+    replace, find in files, macros, bookmarks, encoding-aware saving and crash recovery.</p>
+    <p>Themes and user-defined languages are plain XML files you can add yourself.</p>
+  </description>
+  <launchable type="desktop-id">io.github.DakodaStemen.Velox.desktop</launchable>
+  <provides><binary>velox</binary></provides>
+  <url type="homepage">https://github.com/DakodaStemen/velox</url>
+  <url type="bugtracker">https://github.com/DakodaStemen/velox/issues</url>
+  <url type="vcs-browser">https://github.com/DakodaStemen/velox</url>
+  <url type="contribute">https://github.com/DakodaStemen/velox/blob/main/CONTRIBUTING.md</url>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Editing Markdown with a dark theme</caption>
+      <image>https://raw.githubusercontent.com/DakodaStemen/velox/main/docs/screenshot.png</image>
+    </screenshot>
+  </screenshots>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-10-28"/>
+  </releases>
+</component>

@@ -1,0 +1,6 @@
+<RCC>
+  <qresource prefix="/">
+    <file alias="velox.svg">packaging/io.github.DakodaStemen.Velox.svg</file>
+    <file alias="tab-close.svg">packaging/tab-close.svg</file>
+  </qresource>
+</RCC>

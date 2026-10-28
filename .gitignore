@@ -1,0 +1,13 @@
+# Build output
+build/
+*.o
+*.a
+*.so
+*.so.*
+vendor/*/bin/*
+!vendor/*/bin/empty.txt
+
+# Packaging
+packaging/src/
+packaging/pkg/
+packaging/*.pkg.tar.*

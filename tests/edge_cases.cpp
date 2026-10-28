@@ -1,0 +1,444 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 The Velox Authors
+#include "ILexer.h"
+#include "Lexilla.h"
+#include "SciLexer.h"
+#include "window.h"
+#include <QtTest>
+#include <sys/stat.h>
+#include <unistd.h>
+
+class EdgeCases : public QObject {
+  Q_OBJECT
+  static void put(const QString &p, const QByteArray &b) {
+    QFile f(p);
+    QVERIFY(f.open(QIODevice::WriteOnly));
+    QCOMPARE(f.write(b), qint64(b.size()));
+  }
+  static QByteArray get(const QString &p) {
+    QFile f(p);
+    return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
+  }
+  static bool trigger(Window &w, const QString &text) {
+    for (auto *a : w.findChildren<QAction *>())
+      if (a->text() == text) {
+        a->trigger();
+        return true;
+      }
+    return false;
+  }
+  static sptr_t at(EditorTab *t, unsigned int msg, uptr_t w = 0, sptr_t l = 0) {
+    return t->primary->send(msg, w, l);
+  }
+
+private slots:
+  // ---- file reading and writing -------------------------------------------
+  void emptyAndBomOnlyFiles() {
+    QTemporaryDir dir;
+    for (const auto &raw : {QByteArray(), QByteArray::fromHex("efbbbf"),
+                            QByteArray::fromHex("fffe"),
+                            QByteArray::fromHex("feff")}) {
+      QString p = dir.filePath("f");
+      put(p, raw);
+      DocumentData d;
+      QString error;
+      QVERIFY2(DocumentData::read(p, d, error), qPrintable(error));
+      QVERIFY(d.utf8.isEmpty());
+      QVERIFY2(d.write(d.utf8, p, error), qPrintable(error));
+      QCOMPARE(get(p), raw);
+    }
+  }
+  void rejectsMalformedAndBinaryInput() {
+    QTemporaryDir dir;
+    QString p = dir.filePath("bad");
+    DocumentData d;
+    QString error;
+    for (const auto &raw :
+         {QByteArray::fromHex("fffe6100"
+                              "62"),          // UTF-16LE with odd byte count
+          QByteArray::fromHex("fffe0000610000"), // UTF-32LE
+          QByteArray::fromHex("c328"),           // invalid UTF-8
+          QByteArray::fromHex("ed a0 80"),       // UTF-8 encoded surrogate
+          QByteArray("abc\0def", 7)}) {          // NUL byte
+      put(p, raw);
+      error.clear();
+      QVERIFY2(!DocumentData::read(p, d, error), raw.toHex().constData());
+      QVERIFY(!error.isEmpty());
+    }
+    QVERIFY(!DocumentData::read(dir.filePath("missing"), d, error));
+    QVERIFY(!DocumentData::read(dir.path(), d, error));
+    QString fifo = dir.filePath("fifo");
+    QVERIFY(::mkfifo(QFile::encodeName(fifo), 0600) == 0);
+    QVERIFY(!DocumentData::read(fifo, d, error)); // must not block
+    QVERIFY(!DocumentData::read("/dev/zero", d, error)); // must not exhaust memory
+    QVERIFY(!DocumentData::read("/dev/null", d, error));
+  }
+  void unicodePathsAndLongLines() {
+    QTemporaryDir dir;
+    QString p = dir.filePath(QString::fromUtf8("Ünïcødé 文件 #1 (copy).txt"));
+    QByteArray line(5 * 1024 * 1024, 'x');
+    line += QString::fromUtf8(" 🌍 end").toUtf8();
+    put(p, line);
+    Window w(true);
+    QVERIFY(w.openFile(p));
+    QCOMPARE(w.current()->text(), line);
+    QCOMPARE(at(w.current(), SCI_GETLINECOUNT), sptr_t(1));
+    QVERIFY(w.save(w.current()));
+    QCOMPARE(get(p), line);
+  }
+  void mixedAndLoneCarriageReturns() {
+    QTemporaryDir dir;
+    QString p = dir.filePath("cr.txt");
+    put(p, "a\rb\rc\r\nd");
+    Window w(true);
+    QVERIFY(w.openFile(p));
+    QCOMPARE(at(w.current(), SCI_GETEOLMODE), sptr_t(SC_EOL_CR));
+    QCOMPARE(at(w.current(), SCI_GETLINECOUNT), sptr_t(4));
+    QVERIFY(w.save(w.current()));
+    QCOMPARE(get(p), QByteArray("a\rb\rc\r\nd")); // untouched EOLs stay
+    w.eolChoice->setCurrentIndex(0);              // convert to LF
+    QVERIFY(w.save(w.current()));
+    QCOMPARE(get(p), QByteArray("a\nb\nc\nd"));
+  }
+  void failedSavesNeverDamageTheOriginal() {
+    QTemporaryDir dir;
+    QString sub = dir.filePath("locked"), p = sub + "/file.txt";
+    QVERIFY(QDir().mkpath(sub));
+    put(p, "original\n");
+    Window w(true);
+    QVERIFY(w.openFile(p));
+    auto *t = w.current();
+    t->primary->send(SCI_APPENDTEXT, 4, reinterpret_cast<sptr_t>("more"));
+    QVERIFY(::chmod(QFile::encodeName(sub), 0555) == 0);
+    bool saved = w.save(t);
+    ::chmod(QFile::encodeName(sub), 0755);
+    if (geteuid() != 0) { // root ignores directory permissions
+      QVERIFY(!saved);
+      QCOMPARE(get(p), QByteArray("original\n"));
+      QVERIFY(t->dirty());
+    }
+    // Lossy encoding change is refused and leaves the file alone.
+    t->setText(QString::fromUtf8("emoji 🌍\n").toUtf8(), true);
+    w.encodingChoice->setCurrentText("Windows-1252");
+    QVERIFY(!w.save(t));
+    QVERIFY(get(p).startsWith("original"));
+    // Dangling symlink and directory destinations are refused.
+    QString link = dir.filePath("dangling");
+    QVERIFY(::symlink("/nonexistent/target", QFile::encodeName(link)) == 0);
+    DocumentData d;
+    QString error;
+    QVERIFY(!d.write("x", link, error));
+    QVERIFY(!d.write("x", dir.path(), error));
+  }
+  void openRejectsDirectoriesMissingAndHugeFiles() {
+    QTemporaryDir dir;
+    Window w(true);
+    QVERIFY(!w.openFile(dir.filePath("nope.txt")));
+    QVERIFY(!w.openFile(dir.path()));
+    QString huge = dir.filePath("huge.log");
+    QFile f(huge);
+    QVERIFY(f.open(QIODevice::WriteOnly));
+    QVERIFY(f.resize(qint64(129) * 1024 * 1024)); // sparse, no real disk use
+    f.close();
+    QVERIFY(!w.openFile(huge));
+    QCOMPARE(w.tabs->count(), 0);
+  }
+  void sameFileThroughSymlinkOpensOnce() {
+    QTemporaryDir dir;
+    QString real = dir.filePath("real.txt"), link = dir.filePath("link.txt");
+    put(real, "x");
+    QVERIFY(::symlink(QFile::encodeName(real), QFile::encodeName(link)) == 0);
+    Window w(true);
+    QVERIFY(w.openFile(real));
+    QVERIFY(w.openFile(link));
+    QVERIFY(w.openFile(dir.path() + "/./real.txt"));
+    QCOMPARE(w.tabs->count(), 1);
+  }
+
+  // ---- search and replace --------------------------------------------------
+  void searchEdgeCases() {
+    Window w(true);
+    auto *t = w.newDocument("");
+    w.query->setText("x");
+    QVERIFY(!w.find());
+    QCOMPARE(w.replaceAll(), 0);
+    QCOMPARE(w.markAll(), 0);
+    w.query->clear();
+    t->setText("abc");
+    QVERIFY(!w.find());
+    QCOMPARE(w.replaceAll(), 0);
+    // Replacement containing the match must not loop forever.
+    w.query->setText("a");
+    w.replacement->setText("aa");
+    t->setText("a a a");
+    QCOMPARE(w.replaceAll(), 3);
+    QCOMPARE(t->text(), QByteArray("aa aa aa"));
+    // Replace with nothing.
+    w.replacement->clear();
+    QCOMPARE(w.replaceAll(), 6);
+    QCOMPARE(t->text(), QByteArray("  "));
+    // Wrap-around in both directions.
+    t->setText("one two one");
+    w.query->setText("one");
+    t->primary->send(SCI_GOTOPOS, 10);
+    QVERIFY(w.find());
+    QCOMPARE(at(t, SCI_GETSELECTIONSTART), sptr_t(0));
+    t->primary->send(SCI_GOTOPOS, 1);
+    QVERIFY(w.find(true));
+    QCOMPARE(at(t, SCI_GETSELECTIONSTART), sptr_t(8));
+  }
+  void regexEdgeCases() {
+    Window w(true);
+    auto *t = w.newDocument("");
+    w.regex->setChecked(true);
+    auto replace = [&](const QByteArray &text, const QString &q,
+                       const QString &r, int count, const QByteArray &result) {
+      t->setText(text);
+      w.query->setText(q);
+      w.replacement->setText(r);
+      QCOMPARE(w.replaceAll(), count);
+      QCOMPARE(t->text(), result);
+    };
+    replace("a\r\nb\r\n", "$", ";", 3, "a;\r\nb;\r\n;");
+    replace("a\r\n\r\nb", "^$", "-", 1, "a\r\n-\r\nb");
+    replace("x\r\ny", "\\r?\\n", "|", 1, "x|y");
+    replace("foo1 bar2", "(\\w+?)(\\d)", "\\2\\1", 2, "1foo 2bar");
+    replace("price 10 cost 20", "\\d+(?= )", "N", 1, "price N cost 20");
+    replace(QString::fromUtf8("🌍é").toUtf8(), ".", "#", 2, "##");
+    replace("aaa", "a*", "X", 1, "X");
+    replace("Hello", "(?i)hello", "bye", 1, "bye");
+    replace("tab\there", "\\t", "\\\\t", 1, "tab\\there");
+    w.query->setText("(unclosed");
+    QCOMPARE(w.replaceAll(), 0);
+    QVERIFY(!w.find());
+    QCOMPARE(w.markAll(), 0);
+    // A valid search afterwards still works (status was reset).
+    t->setText("ok");
+    w.query->setText("o.");
+    QVERIFY(w.find());
+  }
+  void wholeWordAndCaseOptions() {
+    Window w(true);
+    auto *t = w.newDocument("Cat cat concat CAT_x cat.");
+    w.query->setText("cat");
+    QCOMPARE(w.markAll(), 5); // includes "concat" and "CAT_x"
+    w.matchCase->setChecked(true);
+    QCOMPARE(w.markAll(), 3);
+    w.wholeWord->setChecked(true);
+    QCOMPARE(w.markAll(), 2);
+    Q_UNUSED(t);
+  }
+  void replaceIsSingleUndoStep() {
+    Window w(true);
+    auto *t = w.newDocument("a b a b a");
+    w.query->setText("a");
+    w.replacement->setText("c");
+    QCOMPARE(w.replaceAll(), 3);
+    t->primary->send(SCI_UNDO);
+    QCOMPARE(t->text(), QByteArray("a b a b a"));
+  }
+
+  // ---- find in files -------------------------------------------------------
+  void findInFilesEdgeCases() {
+    QTemporaryDir dir;
+    Window w(true);
+    w.query->setText("needle");
+    QCOMPARE(w.findInFiles(dir.path(), "*"), 0);              // empty folder
+    QCOMPARE(w.findInFiles(dir.filePath("missing"), "*"), 0); // missing folder
+    QDir(dir.path()).mkpath("a/b");
+    put(dir.filePath("a/b/deep.txt"), "x needle\n");
+    put(dir.filePath("utf16.txt"),
+        QByteArray::fromHex("fffe") +
+            QByteArray::fromRawData(reinterpret_cast<const char *>(
+                                        QString("hay needle").utf16()),
+                                    20));
+    put(dir.filePath("latin1.txt"), QByteArray("caf\xe9 needle"));
+    put(dir.filePath("locked.txt"), "needle");
+    ::chmod(QFile::encodeName(dir.filePath("locked.txt")), 0);
+    QVERIFY(::symlink(QFile::encodeName(dir.path()),
+                      QFile::encodeName(dir.filePath("a/loop"))) == 0);
+    int hits = w.findInFiles(dir.path(), "*.txt, *.md; *.cpp");
+    ::chmod(QFile::encodeName(dir.filePath("locked.txt")), 0644);
+    // deep + utf16 (+ locked when running as root); latin1 is skipped.
+    QCOMPARE(hits, geteuid() == 0 ? 3 : 2);
+    // Opening a UTF-16 result selects the right characters.
+    for (int i = 0; i < w.results->topLevelItemCount(); ++i)
+      if (w.results->topLevelItem(i)->text(0).startsWith("utf16"))
+        w.openResult(w.results->topLevelItem(i)->child(0));
+    auto *t = w.current();
+    QVERIFY(t && t->data.encoding == "UTF-16LE");
+    QByteArray sel(at(t, SCI_GETSELTEXT, 0, 0) + 1, '\0');
+    t->primary->send(SCI_GETSELTEXT, 0, reinterpret_cast<sptr_t>(sel.data()));
+    QCOMPARE(QByteArray(sel.constData()), QByteArray("needle"));
+  }
+  void findInFilesHandlesManyFiles() {
+    QTemporaryDir dir;
+    for (int i = 0; i < 2000; ++i)
+      put(dir.filePath(QString("f%1.txt").arg(i)), "line\nneedle here\n");
+    Window w(true);
+    w.query->setText("needle");
+    QElapsedTimer timer;
+    timer.start();
+    QCOMPARE(w.findInFiles(dir.path(), "*.txt"), 2000);
+    QVERIFY2(timer.elapsed() < 10000, qPrintable(QString::number(timer.elapsed())));
+  }
+
+  // ---- sessions and recovery ----------------------------------------------
+  void corruptOrForeignSessionFiles() {
+    QTemporaryDir dir;
+    for (const auto &raw :
+         {QByteArray("{not json"), QByteArray("[]"),
+          QByteArray("{\"version\":99,\"documents\":[]}"),
+          QByteArray("{\"version\":1,\"documents\":[{\"path\":\"/no/such/file\"}]}"),
+          QByteArray("{\"version\":1,\"documents\":\"oops\",\"active\":42}")}) {
+      QString p = dir.filePath("session.json");
+      put(p, raw);
+      Window w(true);
+      w.sessionPath = p;
+      w.restore();
+      QCOMPARE(w.tabs->count(), 1); // falls back to one blank tab
+    }
+  }
+  void closingLastTabLeavesBlankDocument() {
+    Window w(true);
+    w.newDocument();
+    QVERIFY(w.closeTab(0));
+    QCOMPARE(w.tabs->count(), 1);
+    QVERIFY(w.current()->data.path.isEmpty());
+    QVERIFY(w.closeTab(-1));
+  }
+  void externalDeletionAndTouchDetection() {
+    QTemporaryDir dir;
+    QString p = dir.filePath("t.txt");
+    put(p, "same\n");
+    Window w(true);
+    QVERIFY(w.openFile(p));
+    QTest::qWait(20);
+    put(p, "same\n"); // rewritten with identical content: not a change
+    QFile(p).setFileTime(QDateTime::currentDateTime().addSecs(5),
+                         QFileDevice::FileModificationTime);
+    w.checkDisk();
+    QVERIFY(w.statusBar()->currentMessage().isEmpty());
+    QFile::remove(p);
+    w.checkDisk();
+    QVERIFY(w.statusBar()->currentMessage().startsWith("t.txt changed"));
+    QVERIFY(!w.save(w.current())); // refuses to recreate silently
+  }
+
+  // ---- languages, themes, UI actions ---------------------------------------
+  void languageDetection() {
+    QTemporaryDir dir;
+    Window w(true);
+    QMap<QString, QString> cases{{"SCRIPT.PY", "python"},
+                                 {"Makefile", "makefile"},
+                                 {"noext", "normal"},
+                                 {"x.unknownext", "normal"},
+                                 {".bashrc", "bash"},
+                                 {"a.json", "json"},
+                                 {"a.html", "html"}};
+    for (auto it = cases.begin(); it != cases.end(); ++it) {
+      put(dir.filePath(it.key()), "x\n");
+      QVERIFY(w.openFile(dir.filePath(it.key())));
+      QCOMPARE(w.current()->language, it.value());
+    }
+    w.applyLanguage(w.current(), "no-such-language");
+    QCOMPARE(w.current()->language, QString("normal"));
+    w.applyLanguage(nullptr, "python");
+  }
+  void everyLanguageWithEveryTheme() {
+    Window w(true);
+    auto *t = w.newDocument("int main() { return 0; } // x\n<a href='x'>y</a>\n");
+    QVERIFY(w.themeChoice->count() >= 20);
+    for (int i = 0; i < w.themeChoice->count(); ++i) {
+      w.themeChoice->setCurrentIndex(i);
+      for (const auto &name : w.languages.keys()) {
+        w.applyLanguage(t, name);
+        QCOMPARE(t->language, name);
+      }
+    }
+  }
+  void userLanguageFromConfigFolder() {
+    QDir().mkpath(configPath("userDefineLangs"));
+    QString p = configPath("userDefineLangs/test.udl.xml");
+    put(p, "<Velox><UserLang name=\"Tiny\" ext=\"tiny\"><Settings><Global "
+           "caseIgnored=\"yes\"/></Settings><KeywordLists><Keywords "
+           "name=\"Keywords1\">begin end \"two words\"</Keywords><Keywords "
+           "name=\"Comments\">00; 01 02</Keywords></KeywordLists><Styles>"
+           "<WordsStyle name=\"KEYWORDS1\" fgColor=\"FF0000\" colorStyle=\"1\" "
+           "fontStyle=\"1\"/></Styles></UserLang></Velox>");
+    put(configPath("userDefineLangs/broken.xml"), "<Velox><UserLang");
+    QTemporaryDir dir;
+    put(dir.filePath("a.tiny"), "BEGIN x two words end ; note\n");
+    Window w(true);
+    QVERIFY(w.openFile(dir.filePath("a.tiny")));
+    auto *t = w.current();
+    QCOMPARE(t->language, QString("Tiny"));
+    QCOMPARE(at(t, SCI_GETSTYLEAT, 0), sptr_t(SCE_USER_STYLE_KEYWORD1));
+    QCOMPARE(at(t, SCI_GETSTYLEAT, 8), sptr_t(SCE_USER_STYLE_KEYWORD1));
+    QCOMPARE(at(t, SCI_GETSTYLEAT, 24), sptr_t(SCE_USER_STYLE_COMMENTLINE));
+    QVERIFY(at(t, SCI_STYLEGETBOLD, SCE_USER_STYLE_KEYWORD1));
+    QFile::remove(p);
+    QFile::remove(configPath("userDefineLangs/broken.xml"));
+  }
+  void menuActionsOnEmptyAndFullDocuments() {
+    Window w(true);
+    auto *t = w.newDocument("  a  \n\tb\t\n\n c");
+    QVERIFY(trigger(w, "Trim trailing whitespace"));
+    QCOMPARE(t->text(), QByteArray("  a\n\tb\n\n c"));
+    t->primary->send(SCI_GOTOLINE, 1);
+    QVERIFY(trigger(w, "Toggle bookmark"));
+    t->primary->send(SCI_GOTOLINE, 3);
+    QVERIFY(trigger(w, "Next bookmark")); // wraps to line 1
+    QCOMPARE(at(t, SCI_LINEFROMPOSITION, at(t, SCI_GETCURRENTPOS)), sptr_t(1));
+    QVERIFY(trigger(w, "Duplicate line / selection"));
+    QVERIFY(trigger(w, "Uppercase"));
+    QVERIFY(trigger(w, "Split document"));
+    QVERIFY(trigger(w, "Word wrap"));
+    QVERIFY(trigger(w, "Show whitespace"));
+    QVERIFY(trigger(w, "Mark all occurrences"));
+    QVERIFY(trigger(w, "Clear marks"));
+    // Every action must survive a window with an empty document.
+    auto *empty = w.newDocument();
+    Q_UNUSED(empty);
+    const QStringList skip{"Quit", "Open…", "Open with encoding…",
+                           "Open folder…", "Save as…", "Save session…",
+                           "Load session…", "Go to line…", "Fullscreen",
+                           "Open configuration folder", "About Velox",
+                           "Save", "Save all", "Close tab"};
+    for (auto *a : w.findChildren<QAction *>())
+      if (!a->text().isEmpty() && !skip.contains(QString(a->text()).remove('&')) &&
+          !a->menu())
+        a->trigger();
+    QVERIFY(w.current());
+  }
+  void macroRecordAndPlayback() {
+    Window w(true);
+    auto *t = w.newDocument("");
+    QVERIFY(trigger(w, "Start / stop recording"));
+    t->primary->send(SCI_REPLACESEL, 0, reinterpret_cast<sptr_t>("ab"));
+    t->primary->send(SCI_NEWLINE);
+    QVERIFY(trigger(w, "Start / stop recording"));
+    QVERIFY(trigger(w, "Playback"));
+    QVERIFY(trigger(w, "Playback"));
+    QCOMPARE(t->text(), QByteArray("ab\nab\nab\n"));
+  }
+  void splitViewSurvivesTabClose() {
+    Window w(true);
+    auto *t = w.newDocument("x");
+    t->toggleSplit();
+    t->secondary->setFocus();
+    t->metadataDirty = false;
+    t->primary->send(SCI_SETSAVEPOINT);
+    QVERIFY(w.closeTab(w.tabs->indexOf(t)));
+    QCOMPARE(w.tabs->count(), 1);
+  }
+};
+
+int runEdgeCases() {
+  EdgeCases test;
+  int argc = 1;
+  char name[] = "edge-cases";
+  char *argv[] = {name, nullptr};
+  return QTest::qExec(&test, argc, argv);
+}
+#include "edge_cases.moc"
