@@ -6,6 +6,7 @@
 #include "Lexilla.h"
 #include "SciLexer.h"
 #include "BoostRegexSearch.h"
+#include <QScopedValueRollback>
 #include <algorithm>
 // Legacy encodings offered for opening and saving; unavailable codecs are
 // dropped so the list never contains a name Qt cannot convert.
@@ -185,14 +186,27 @@ QString EditorTab::title() const {
          (dirty() ? " •" : "");
 }
 
-Window::Window(bool test)
-    : testing(test), settings(configPath("settings.ini"), QSettings::IniFormat) {
+bool Window::pidAlive(qint64 pid) {
+  return pid > 0 && QFileInfo::exists(QString("/proc/%1").arg(pid));
+}
+qint64 Window::recoveryPid(const QString &fileName) {
+  static const QRegularExpression expr("^recovery-(\\d+)\\.json$");
+  auto m = expr.match(fileName);
+  return m.hasMatch() ? m.captured(1).toLongLong() : 0;
+}
+
+Window::Window(bool test, bool sharedInstance)
+    : testing(test), shared(sharedInstance), settings(configPath("settings.ini"), QSettings::IniFormat) {
   setWindowTitle("Velox");
   resize(1300, 850);
   setAcceptDrops(true);
+  // Each --new-instance window snapshots into its own file so windows cannot
+  // overwrite one another's unsaved text.
   sessionPath =
       QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) +
-      "/velox/recovery.json";
+      (shared ? QString("/velox/recovery.json")
+              : QString("/velox/recovery-%1.json")
+                    .arg(QCoreApplication::applicationPid()));
   QDir().mkpath(QFileInfo(sessionPath).absolutePath());
   loadLanguages();
   auto *center = new QWidget;
@@ -467,6 +481,7 @@ void Window::buildMenus() {
     DocumentData d;
     QString error;
     if (DocumentData::read(t->data.path, d, error, t->data.encoding)) {
+      QScopedValueRollback<bool> quiet(suppressMacro, true);
       t->data = d;
       t->setText(d.utf8);
       dismissedChanges.remove(t);
@@ -719,6 +734,8 @@ QStringList Window::completions(const QString &language) {
   return *completionCache.insert(language, words);
 }
 EditorTab *Window::newDocument(const QByteArray &text) {
+  // Loading a document is not a user edit; keep it out of a running macro.
+  QScopedValueRollback<bool> quiet(suppressMacro, true);
   auto *t = new EditorTab;
   t->untitled = counter++;
   int i = tabs->addTab(t, t->title());
@@ -795,11 +812,15 @@ EditorTab *Window::newDocument(const QByteArray &text) {
                 return;
               unsigned int m = static_cast<unsigned int>(msg);
               QByteArray b;
+              // lParam points at caller memory that is gone by playback
+              // time, so copy the text now and never store the pointer.
               if (m == SCI_REPLACESEL || m == SCI_ADDTEXT ||
-                  m == SCI_INSERTTEXT) {
+                  m == SCI_INSERTTEXT || m == SCI_APPENDTEXT ||
+                  m == SCI_SEARCHNEXT || m == SCI_SEARCHPREV) {
                 if (l)
-                  b = m == SCI_ADDTEXT
-                          ? QByteArray(reinterpret_cast<const char *>(l), w)
+                  b = (m == SCI_ADDTEXT || m == SCI_APPENDTEXT)
+                          ? QByteArray(reinterpret_cast<const char *>(l),
+                                       int(w))
                           : QByteArray(reinterpret_cast<const char *>(l));
                 l = 0;
               }
@@ -815,6 +836,7 @@ EditorTab *Window::newDocument(const QByteArray &text) {
   return t;
 }
 bool Window::openFile(const QString &path, const QString &fallback) {
+  QScopedValueRollback<bool> quiet(suppressMacro, true);
   const QString absolute = QFileInfo(path).absoluteFilePath();
   const QString canonical = QFileInfo(absolute).canonicalFilePath();
   for (int i = 0; i < tabs->count(); ++i) {
@@ -1591,17 +1613,21 @@ void Window::snapshot() {
   if (!testing)
     saveSession(sessionPath);
 }
-void Window::restoreSession(const QString &path) {
+bool Window::restoreSession(const QString &path) {
   QFile f(path);
   if (!f.open(QIODevice::ReadOnly))
-    return;
+    return false;
   QJsonParseError err;
   auto doc = QJsonDocument::fromJson(f.readAll(), &err);
   if (err.error != QJsonParseError::NoError || !doc.isObject() ||
       doc.object()["version"].toInt() != 1) {
     report("Invalid or unsupported session file.");
-    return;
+    return false;
   }
+  QScopedValueRollback<bool> quiet(suppressMacro, true);
+  // One summary instead of one modal dialog per unrestorable file.
+  QStringList problems;
+  deferredReports = &problems;
   auto obj = doc.object();
   int first = tabs->count();
   for (const auto &value : obj["documents"].toArray()) {
@@ -1612,8 +1638,16 @@ void Window::restoreSession(const QString &path) {
       t = newDocument();
       t->data = d;
       t->setText(d.utf8, o["dirty"].toBool());
-    } else if (openFile(o["path"].toString(), o["encoding"].toString()))
-      t = current();
+    } else {
+      const QString p = o["path"].toString();
+      const int before = problems.size();
+      if (openFile(p, o["encoding"].toString()))
+        t = current();
+      else if (problems.size() > before)
+        problems[before] = p + ": " + problems[before];
+      else
+        problems << p + ": could not be opened";
+    }
     if (!t)
       continue;
     applyLanguage(t, o["language"].toString("normal"));
@@ -1626,10 +1660,48 @@ void Window::restoreSession(const QString &path) {
   if (first + obj["active"].toInt() < tabs->count())
     tabs->setCurrentIndex(first + obj["active"].toInt());
   refresh();
+  deferredReports = nullptr;
+  if (!problems.isEmpty()) {
+    const int shown = qMin(problems.size(), 10);
+    QString text = QString("%1 item(s) could not be restored:\n\n")
+                       .arg(problems.size()) +
+                   problems.mid(0, shown).join('\n');
+    if (problems.size() > shown)
+      text += QString("\n…and %1 more.").arg(problems.size() - shown);
+    report(text);
+  }
+  return true;
+}
+// Recovery files left by --new-instance windows that died without a clean
+// exit. Only files whose PID is gone are taken; each is deleted after its
+// tabs are loaded and re-snapshotted into this window's own file.
+QStringList Window::adoptOrphans(const QString &directory) {
+  QStringList adopted;
+  const qint64 self = QCoreApplication::applicationPid();
+  const auto entries = QDir(directory).entryInfoList(
+      {"recovery-*.json"}, QDir::Files | QDir::NoSymLinks, QDir::Name);
+  for (const auto &info : entries) {
+    const qint64 pid = recoveryPid(info.fileName());
+    if (!pid || pid == self || pidAlive(pid))
+      continue;
+    if (restoreSession(info.absoluteFilePath()))
+      adopted << info.absoluteFilePath();
+    else
+      QFile::rename(info.absoluteFilePath(),
+                    info.absoluteFilePath() + ".corrupt");
+  }
+  if (!adopted.isEmpty()) {
+    saveSession(sessionPath); // the adopted tabs are now safe in our file
+    for (const auto &p : adopted)
+      QFile::remove(p);
+  }
+  return adopted;
 }
 void Window::restore() {
   if (QFileInfo::exists(sessionPath))
     restoreSession(sessionPath);
+  if (shared)
+    adoptOrphans(QFileInfo(sessionPath).absolutePath());
   if (!tabs->count())
     newDocument();
 }
@@ -1660,7 +1732,10 @@ void Window::closeEvent(QCloseEvent *event) {
     t->metadataDirty = false;
     t->primary->send(SCI_SETSAVEPOINT);
   }
-  saveSession(sessionPath);
+  if (shared)
+    saveSession(sessionPath); // becomes the next launch's session
+  else
+    QFile::remove(sessionPath); // clean exit: nothing left to recover
   settings.setValue("geometry", saveGeometry());
   settings.setValue("recent", recent);
   settings.setValue("theme", themeChoice->currentText());
@@ -1677,6 +1752,10 @@ void Window::dropEvent(QDropEvent *e) {
   e->acceptProposedAction();
 }
 void Window::report(const QString &message) {
+  if (deferredReports) {
+    *deferredReports << message;
+    return;
+  }
   if (testing)
     qWarning().noquote() << message;
   else

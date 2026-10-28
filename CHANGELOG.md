@@ -25,6 +25,11 @@ All notable changes to this project are documented in this file. Versions follow
 
 ### Documentation
 - Documented what atomic saves do and do not preserve (ownership, ACLs and extended attributes).
+### Fixed
+- Crash recovery: each `--new-instance` window now snapshots into its own `recovery-<pid>.json` instead of overwriting the shared `recovery.json`, and no longer restores the primary window's session. The primary instance adopts recovery files left by dead windows (deleted only after their tabs are re-snapshotted); a clean exit removes the window's own file. The legacy `recovery.json` format still restores.
+- Macros: opening, reloading, restoring or creating documents while recording no longer records the file contents; text for `SCI_APPENDTEXT`, `SCI_SEARCHNEXT` and `SCI_SEARCHPREV` is copied so playback never reads freed memory.
+- Single-instance socket and lock file now live in `$XDG_RUNTIME_DIR` when available (falling back to `/tmp`); forwarded data is capped at 1 MiB, must be absolute paths, and a client that stalls is dropped after 5 s.
+- Session restore reports missing files in one summary instead of one dialog per file, and rejects recovery backups that declare an absurd uncompressed size.
 
 ## [0.1.0] - 2026-10-28
 

@@ -174,7 +174,18 @@ DocumentData DocumentData::fromJson(const QJsonObject &o) {
   d.bom = QByteArray::fromHex(o["bom"].toString().toLatin1());
   d.diskHash = QByteArray::fromHex(o["hash"].toString().toLatin1());
   d.exists = o["exists"].toBool();
-  d.utf8 =
-      qUncompress(QByteArray::fromBase64(o["backup"].toString().toLatin1()));
+  // A backup is untrusted input: qUncompress allocates the size declared in
+  // its 4-byte big-endian prefix before inflating anything.
+  const QByteArray packed =
+      QByteArray::fromBase64(o["backup"].toString().toLatin1());
+  if (packed.size() >= 4) {
+    const auto *u = reinterpret_cast<const uchar *>(packed.constData());
+    const quint64 declared = (quint64(u[0]) << 24) | (quint64(u[1]) << 16) |
+                             (quint64(u[2]) << 8) | quint64(u[3]);
+    // deflate cannot expand more than ~1032:1, so larger claims are bogus.
+    if (declared <= (quint64(1) << 30) &&
+        declared <= quint64(packed.size()) * 1100 + 1024)
+      d.utf8 = qUncompress(packed);
+  }
   return d;
 }

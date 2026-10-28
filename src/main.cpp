@@ -5,12 +5,50 @@
 #ifdef VELOX_SELFTEST
 #include <QtTest>
 #endif
+#include <memory>
 #include <unistd.h>
 #ifdef VELOX_SELFTEST
 int selfTest(QApplication &app);
 #endif
+// Prefer the per-user runtime directory (0700, owned by us) over the shared,
+// world-writable /tmp for the socket and lock file.
+static QString runtimeDir() {
+  const QString dir = qEnvironmentVariable("XDG_RUNTIME_DIR");
+  QFileInfo info(dir);
+  if (dir.isEmpty() || !QDir::isAbsolutePath(dir) || !info.isDir() ||
+      !info.isWritable() || info.ownerId() != getuid())
+    return {};
+  return QDir::cleanPath(dir);
+}
 static QString instanceName() {
-  return QString("velox-%1").arg(getuid());
+  const QString name = QString("velox-%1").arg(getuid());
+  const QString dir = runtimeDir();
+  return dir.isEmpty() ? name : dir + '/' + name + ".sock";
+}
+static QString lockPath() {
+  const QString dir = runtimeDir();
+  return (dir.isEmpty() ? QDir::tempPath() : dir) +
+         QString("/velox-%1.lock").arg(getuid());
+}
+static const qint64 kMaxForwardBytes = 1024 * 1024;
+static const int kForwardTimeoutMs = 5000;
+// Validates what a client sent: a JSON array of absolute paths, nothing else.
+QStringList parseForwardedFiles(const QByteArray &data, bool *ok) {
+  QStringList files;
+  *ok = false;
+  if (data.size() > kMaxForwardBytes)
+    return files;
+  QJsonParseError err;
+  const auto doc = QJsonDocument::fromJson(data, &err);
+  if (err.error != QJsonParseError::NoError || !doc.isArray())
+    return files;
+  for (const auto &v : doc.array()) {
+    const QString f = v.toString();
+    if (!f.isEmpty() && QDir::isAbsolutePath(f))
+      files << f;
+  }
+  *ok = true;
+  return files;
 }
 // Hands files to an already running Velox; true when one accepted them.
 static bool forwardToRunning(const QStringList &files) {
@@ -63,7 +101,7 @@ int main(int argc, char **argv) {
   bool shared = !shot && !parser.isSet("new-instance");
   // The lock makes "is one running? if not, become it" atomic, so several
   // simultaneous launches still end up in a single window.
-  QLockFile lock(QDir::tempPath() + '/' + instanceName() + ".lock");
+  QLockFile lock(lockPath());
   QLocalServer server;
   if (shared) {
     lock.tryLock(5000);
@@ -97,7 +135,7 @@ int main(int argc, char **argv) {
       "QStatusBar{padding:4px} QComboBox{padding:4px} "
       "QPushButton{padding:6px 12px} QLineEdit{padding:6px} "
       "QDockWidget::title{padding:8px} QSplitter::handle{background:#394352}");
-  Window window(shot);
+  Window window(shot, shared);
   if (!parser.isSet("fresh") && !shot)
     window.restore();
   for (const auto &path : files)
@@ -106,17 +144,44 @@ int main(int argc, char **argv) {
     window.newDocument();
   if (server.isListening()) {
     QObject::connect(&server, &QLocalServer::newConnection, [&] {
-      while (auto *socket = server.nextPendingConnection())
-        QObject::connect(
-            socket, &QLocalSocket::disconnected, socket, [&window, socket] {
-              for (const auto &f :
-                   QJsonDocument::fromJson(socket->readAll()).array())
-                window.openFile(f.toString());
-              window.setWindowState(window.windowState() & ~Qt::WindowMinimized);
-              window.raise();
-              window.activateWindow();
-              socket->deleteLater();
-            });
+      while (auto *socket = server.nextPendingConnection()) {
+        // Size-capped and time-limited: a client that never disconnects or
+        // streams endlessly is dropped instead of holding the socket.
+        auto data = std::make_shared<QByteArray>();
+        auto done = std::make_shared<bool>(false);
+        auto finish = [&window, socket, data, done](bool accept) {
+          if (*done)
+            return;
+          *done = true;
+          socket->disconnect();
+          bool ok = false;
+          const QStringList files =
+              accept ? parseForwardedFiles(*data, &ok) : QStringList();
+          if (ok) {
+            for (const auto &f : files)
+              window.openFile(f);
+            window.setWindowState(window.windowState() &
+                                  ~Qt::WindowMinimized);
+            window.raise();
+            window.activateWindow();
+          }
+          socket->abort();
+          socket->deleteLater();
+        };
+        QObject::connect(socket, &QLocalSocket::readyRead, socket,
+                         [socket, data, finish] {
+                           data->append(socket->readAll());
+                           if (data->size() > kMaxForwardBytes)
+                             finish(false);
+                         });
+        QObject::connect(socket, &QLocalSocket::disconnected, socket,
+                         [socket, data, finish] {
+                           data->append(socket->readAll());
+                           finish(true);
+                         });
+        QTimer::singleShot(kForwardTimeoutMs, socket,
+                           [finish] { finish(false); });
+      }
     });
   }
   window.show();

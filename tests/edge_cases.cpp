@@ -8,6 +8,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+QStringList parseForwardedFiles(const QByteArray &data, bool *ok);
+
 class EdgeCases : public QObject {
   Q_OBJECT
   static void put(const QString &p, const QByteArray &b) {
@@ -467,6 +469,137 @@ private slots:
     t->primary->send(SCI_SETSAVEPOINT);
     QVERIFY(w.closeTab(w.tabs->indexOf(t)));
     QCOMPARE(w.tabs->count(), 1);
+  }
+  void macroIgnoresProgrammaticLoads() {
+    QTemporaryDir dir;
+    QString p = dir.filePath("loaded.txt");
+    put(p, "from disk\n");
+    Window w(true);
+    w.newDocument("");
+    QVERIFY(trigger(w, "Start / stop recording"));
+    QVERIFY(w.openFile(p));
+    QVERIFY(trigger(w, "Reload from disk"));
+    QVERIFY(w.macro.isEmpty());
+    w.newDocument("seed");
+    QVERIFY(w.macro.isEmpty());
+    QVERIFY(!w.suppressMacro);
+    w.current()->primary->send(SCI_REPLACESEL, 0,
+                               reinterpret_cast<sptr_t>("typed"));
+    QVERIFY(!w.macro.isEmpty()); // real user edits still record
+    QVERIFY(trigger(w, "Start / stop recording"));
+  }
+  void macroCopiesPointerText() {
+    Window w(true);
+    auto *t = w.newDocument("");
+    w.recording = true;
+    w.macro.clear();
+    w.macroText.clear();
+    QByteArray a("appended"), s("needle");
+    t->primary->send(SCI_APPENDTEXT, a.size(),
+                     reinterpret_cast<sptr_t>(a.constData()));
+    t->primary->send(SCI_SETTARGETRANGE, 0, 0);
+    t->primary->send(SCI_SEARCHNEXT, 0, reinterpret_cast<sptr_t>(s.constData()));
+    a.fill('z');
+    s.fill('z');
+    bool appended = false, searched = false;
+    for (int i = 0; i < w.macro.size(); ++i) {
+      if (w.macro[i][0] == SCI_APPENDTEXT) {
+        appended = true;
+        QCOMPARE(w.macroText[i], QByteArray("appended"));
+        QCOMPARE(w.macro[i][2], qintptr(0));
+      }
+      if (w.macro[i][0] == SCI_SEARCHNEXT) {
+        searched = true;
+        QCOMPARE(w.macroText[i], QByteArray("needle"));
+        QCOMPARE(w.macro[i][2], qintptr(0));
+      }
+    }
+    QVERIFY(appended);
+    QVERIFY(searched);
+    w.recording = false;
+  }
+  void backupSizeCapRejectsAbsurdLengths() {
+    DocumentData d;
+    d.path = "/tmp/x";
+    auto good = d.json("hello\n", true);
+    QCOMPARE(DocumentData::fromJson(good).utf8, QByteArray("hello\n"));
+    for (quint32 declared : {0x7fffffffu, 0x40000001u, 0xffffffffu}) {
+      QByteArray packed(8, '\0');
+      packed[0] = char(declared >> 24);
+      packed[1] = char(declared >> 16);
+      packed[2] = char(declared >> 8);
+      packed[3] = char(declared);
+      auto bad = good;
+      bad["backup"] = QString::fromLatin1(packed.toBase64());
+      QVERIFY(DocumentData::fromJson(bad).utf8.isEmpty());
+    }
+    auto tiny = good;
+    tiny["backup"] = QString::fromLatin1(QByteArray("ab").toBase64());
+    QVERIFY(DocumentData::fromJson(tiny).utf8.isEmpty());
+  }
+  void recoveryFileNamingAndAdoption() {
+    QCOMPARE(Window::recoveryPid("recovery-123.json"), qint64(123));
+    QCOMPARE(Window::recoveryPid("recovery.json"), qint64(0));
+    QCOMPARE(Window::recoveryPid("recovery-1a.json"), qint64(0));
+    QVERIFY(Window::pidAlive(getpid()));
+    QVERIFY(!Window::pidAlive(999999999));
+    {
+      Window own(true, false);
+      QVERIFY(own.sessionPath.endsWith(
+          QString("recovery-%1.json").arg(QCoreApplication::applicationPid())));
+      Window primary(true, true);
+      QVERIFY(primary.sessionPath.endsWith("/recovery.json"));
+    }
+    QTemporaryDir dir;
+    QString dead = dir.filePath("recovery-999999999.json");
+    QString live = dir.filePath(QString("recovery-%1.json").arg(getppid()));
+    for (const auto &p : {dead, live}) {
+      Window crashed(false, false);
+      crashed.sessionPath = p;
+      crashed.newDocument(QByteArray("unsaved in ") + p.toUtf8());
+      crashed.snapshot();
+      QVERIFY(QFile::exists(p));
+    }
+    Window primary(true, true);
+    primary.sessionPath = dir.filePath("recovery.json");
+    primary.restore();
+    QCOMPARE(primary.tabs->count(), 1);
+    QCOMPARE(primary.current()->text(), QByteArray("unsaved in ") + dead.toUtf8());
+    QVERIFY(!QFile::exists(dead));    // adopted, then removed
+    QVERIFY(QFile::exists(live));     // owner still running: left alone
+    QVERIFY(QFile::exists(primary.sessionPath)); // re-snapshotted first
+    // A --new-instance window never restores or adopts anything.
+    Window other(true, false);
+    other.sessionPath = dir.filePath("recovery-4242.json");
+    other.restore();
+    QCOMPARE(other.tabs->count(), 1);
+    QVERIFY(other.current()->text().isEmpty());
+  }
+  void forwardedDataIsValidated() {
+    bool ok = false;
+    QCOMPARE(parseForwardedFiles("[\"/a/b\",\"rel\",\"\",3]", &ok),
+             QStringList{"/a/b"});
+    QVERIFY(ok);
+    parseForwardedFiles("{\"x\":1}", &ok);
+    QVERIFY(!ok);
+    parseForwardedFiles("not json", &ok);
+    QVERIFY(!ok);
+    QByteArray big = "[\"/" + QByteArray(1024 * 1024 + 1, 'a') + "\"]";
+    parseForwardedFiles(big, &ok);
+    QVERIFY(!ok);
+  }
+  void missingSessionFilesReportOnce() {
+    QTemporaryDir dir;
+    QString p = dir.filePath("session.json");
+    put(p, "{\"version\":1,\"documents\":[{\"path\":\"/no/a\"},"
+           "{\"path\":\"/no/b\"},{\"path\":\"/no/c\"}]}");
+    Window w(true);
+    w.sessionPath = p;
+    QTest::ignoreMessage(QtWarningMsg,
+                         QRegularExpression("3 item\\(s\\) could not be restored"));
+    w.restore();
+    QCOMPARE(w.tabs->count(), 1);
+    QVERIFY(!w.deferredReports);
   }
 };
 
