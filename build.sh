@@ -2,6 +2,7 @@
 # Builds Scintilla, Lexilla and the application.
 #   QT=6 ./build.sh        build against Qt 6 (needs qmake6); default is Qt 5
 #   QMAKE=/path/qmake ...  use a specific qmake instead
+#   DEMO=1 ./build.sh      add the README animation script (see CONTRIBUTING.md)
 #   SANITIZE=1 ./build.sh  add AddressSanitizer and UBSan to the application
 set -euo pipefail
 cd -- "$(dirname -- "$0")"
@@ -16,6 +17,7 @@ build_jobs="${JOBS:-4}"
 # SELFTEST=0 builds without the test suite (packaging); SANITIZE=1 adds ASan+UBSan.
 app_config=()
 if [ "${SELFTEST:-1}" = 0 ]; then app_config+=(CONFIG-=selftest); else app_config+=(CONFIG+=selftest); fi
+if [ "${DEMO:-0}" = 1 ]; then app_config+=(CONFIG+=demo); fi
 qt_major=$("$qmake_binary" -query QT_VERSION | cut -d. -f1)
 sanitize="${SANITIZE:-0}"
 extra=()
@@ -27,7 +29,7 @@ if [ "$sanitize" = 1 ]; then
 fi
 # Scintilla is linked statically from vendor/, so switching Qt major version or
 # sanitizers must not reuse objects built the other way.
-stamp="qt${qt_major}-san${sanitize}"
+stamp="qt${qt_major}-san${sanitize}"  # demo only changes the app, not the libraries
 if [ "$(cat build/.stamp 2>/dev/null || true)" != "$stamp" ]; then
   rm -rf build/scintilla build/app vendor/scintilla/bin/libScintillaEditBase.a
   (cd vendor/lexilla/src && make clean >/dev/null 2>&1 || true)
