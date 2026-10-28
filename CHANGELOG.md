@@ -30,6 +30,12 @@ All notable changes to this project are documented in this file. Versions follow
 - Macros: opening, reloading, restoring or creating documents while recording no longer records the file contents; text for `SCI_APPENDTEXT`, `SCI_SEARCHNEXT` and `SCI_SEARCHPREV` is copied so playback never reads freed memory.
 - Single-instance socket and lock file now live in `$XDG_RUNTIME_DIR` when available (falling back to `/tmp`); forwarded data is capped at 1 MiB, must be absolute paths, and a client that stalls is dropped after 5 s.
 - Session restore reports missing files in one summary instead of one dialog per file, and rejects recovery backups that declare an absurd uncompressed size.
+- The document outline is only built while its dock is visible and scans lines through Scintilla with size caps instead of copying the whole text.
+- Recovery snapshots only read and compress text for modified or untitled tabs, and skip writing `recovery.json` when nothing changed (file format unchanged).
+- Opening large files uses less peak memory (chunked decoding, no extra copy for UTF-8).
+
+### Added
+- Find in files has a Stop button (and Escape), cannot be started twice, disables its button while running, skips files that take too long, and no longer hashes files it only searches.
 
 ## [0.1.0] - 2026-10-28
 

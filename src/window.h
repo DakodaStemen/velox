@@ -53,6 +53,15 @@ public:
   static bool pidAlive(qint64 pid);
   static qint64 recoveryPid(const QString &fileName); // 0 when not ours
   void refresh();
+  void rebuildOutline();
+  void stopSearch();
+  QListWidget *outline;
+  QDockWidget *outlineDock;
+  QPushButton *findFilesButton = nullptr, *stopButton = nullptr;
+  int outlineBuilds = 0;   // how many times the outline was really rebuilt
+  int sessionWrites = 0;   // how many times recovery data hit the disk
+  bool searching = false;  // Find in files is running (re-entrancy guard)
+  bool cancelSearch = false;
   QTabWidget *tabs;
   QLineEdit *query, *replacement, *folder, *filters;
   QCheckBox *matchCase, *wholeWord, *regex;
@@ -86,10 +95,9 @@ private:
   void replaceOne();
   void goToLine();
   void bookmark(bool next = false, bool previous = false);
-  void rebuildOutline();
   void playMacro();
   bool restoreSession(const QString &path);
-  void saveSession(const QString &path);
+  void saveSession(const QString &path, bool onlyIfChanged = false);
   bool canClose(EditorTab *tab);
   void report(const QString &message);
   QAction *action(QMenu *menu, const QString &name,
@@ -101,12 +109,13 @@ private:
                      uptr_t emptyMatch) const;
   QWidget *searchPanel, *replaceRow, *filesRow;
   QLabel *status;
-  QDockWidget *filesDock, *outlineDock, *resultsDock;
+  QDockWidget *filesDock, *resultsDock;
+  bool outlineStale = false;
+  QByteArray lastSessionHash;
   ScintillaEditBase *scanner = nullptr;
   QHash<QString, QStringList> completionCache;
   QFileSystemModel *filesModel;
   QTreeView *files;
-  QListWidget *outline;
   QTimer recoveryTimer, outlineTimer, diskTimer;
   QSettings settings;
   QSet<EditorTab *> dismissedChanges;

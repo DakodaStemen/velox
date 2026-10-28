@@ -271,9 +271,12 @@ Window::Window(bool test, bool sharedInstance)
                                                 if (!p.isEmpty())
                                                   folder->setText(p);
                                               }),
-                               filters, button("Find in files", [this] {
+                               filters,
+                               findFilesButton = button("Find in files", [this] {
                                  findInFiles(folder->text(), filters->text());
-                               })});
+                               }),
+                               stopButton = button("Stop", [this] { stopSearch(); })});
+  stopButton->setEnabled(false);
   auto *options = new QHBoxLayout;
   options->addSpacing(76);
   options->addWidget(matchCase);
@@ -285,7 +288,12 @@ Window::Window(bool test, bool sharedInstance)
   searchPanel->hide();
   auto *escape = new QShortcut(QKeySequence(Qt::Key_Escape), searchPanel);
   escape->setContext(Qt::WidgetWithChildrenShortcut);
-  connect(escape, &QShortcut::activated, this, hideSearch);
+  connect(escape, &QShortcut::activated, this, [this, hideSearch] {
+    if (searching)
+      stopSearch();
+    else
+      hideSearch();
+  });
   connect(query, &QLineEdit::returnPressed, this, [this] {
     if (filesRow->isVisible())
       findInFiles(folder->text(), filters->text());
@@ -318,6 +326,12 @@ Window::Window(bool test, bool sharedInstance)
   outlineDock->setWidget(outline);
   addDockWidget(Qt::RightDockWidgetArea, outlineDock);
   outlineDock->hide();
+  auto showOutline = [this](bool visible) {
+    if (visible && outlineStale)
+      rebuildOutline();
+  };
+  connect(outlineDock, &QDockWidget::visibilityChanged, this, showOutline);
+  connect(outlineDock->toggleViewAction(), &QAction::toggled, this, showOutline);
   connect(outline, &QListWidget::itemActivated, this,
           [this](QListWidgetItem *i) {
             send(SCI_GOTOLINE, i->data(Qt::UserRole).toInt());
@@ -1394,7 +1408,27 @@ void Window::clearMarks() {
 // Scans files through a hidden Scintilla view so results use exactly the same
 // Boost regex semantics as in-document search. Hidden files/directories and
 // files that are not valid UTF-8/UTF-16 text are skipped.
+void Window::stopSearch() {
+  if (searching)
+    cancelSearch = true;
+}
 int Window::findInFiles(const QString &root, const QString &patterns) {
+  if (searching) // re-entered from the event loop below
+    return 0;
+  struct Running {
+    Window *w;
+    explicit Running(Window *window) : w(window) {
+      w->searching = true;
+      w->cancelSearch = false;
+      w->findFilesButton->setEnabled(false);
+      w->stopButton->setEnabled(true);
+    }
+    ~Running() {
+      w->searching = false;
+      w->findFilesButton->setEnabled(true);
+      w->stopButton->setEnabled(false);
+    }
+  } running(this);
   results->clear();
   auto q = query->text().toUtf8();
   if (q.isEmpty() || !QFileInfo(root).isDir()) {
@@ -1410,20 +1444,30 @@ int Window::findInFiles(const QString &root, const QString &patterns) {
                               Qt::SkipEmptyParts);
   QDirIterator it(root, names.isEmpty() ? QStringList{"*"} : names,
                   QDir::Files, QDirIterator::Subdirectories);
-  int hits = 0, matchedFiles = 0, scanned = 0;
+  int hits = 0, matchedFiles = 0, scanned = 0, slow = 0;
   const int limit = 20000;
+  const qint64 slowMs = 5000; // per-file budget for pathological patterns
+  bool cancelled = false;
   while (it.hasNext() && hits < limit) {
     const QString path = it.next();
     if (++scanned % 64 == 0) {
       statusBar()->showMessage(QString("Searching… %1 files").arg(scanned));
-      QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+      // User input stays enabled so Stop / Escape can reach us; the
+      // `searching` guard makes re-entry into findInFiles a no-op.
+      QCoreApplication::processEvents();
+    }
+    if (cancelSearch) {
+      cancelled = true;
+      break;
     }
     if (it.fileInfo().size() > 64 * 1024 * 1024)
       continue;
     DocumentData d;
     QString error;
-    if (!DocumentData::read(path, d, error))
+    if (!DocumentData::read(path, d, error, {}, nullptr, false))
       continue;
+    QElapsedTimer fileTimer;
+    fileTimer.start();
     scanner->send(SCI_SETTEXT, 0, reinterpret_cast<sptr_t>(d.utf8.constData()));
     scanner->send(SCI_SETSEARCHFLAGS,
                   searchFlags(scanner, 0, SCFIND_REGEXP_EMPTYMATCH_NOTAFTERMATCH));
@@ -1435,6 +1479,10 @@ int Window::findInFiles(const QString &root, const QString &patterns) {
       auto pos = scanner->sends(SCI_SEARCHINTARGET, q.size(), q.constData());
       if (pos < 0)
         break;
+      if (fileTimer.elapsed() > slowMs) {
+        ++slow;
+        break;
+      }
       auto end = scanner->send(SCI_GETTARGETEND);
       int line = scanner->send(SCI_LINEFROMPOSITION, pos);
       auto lineStart = scanner->send(SCI_POSITIONFROMLINE, line),
@@ -1462,6 +1510,13 @@ int Window::findInFiles(const QString &root, const QString &patterns) {
       results->clear();
       return 0;
     }
+    if (fileTimer.elapsed() > slowMs && !slow) // single search call was slow
+      ++slow;
+    if (cancelSearch) {
+      cancelled = true;
+      if (!fileItem)
+        break;
+    }
     if (fileItem) {
       fileItem->setText(0, QString("%1  (%2)")
                                .arg(QDir(root).relativeFilePath(path))
@@ -1477,7 +1532,11 @@ int Window::findInFiles(const QString &root, const QString &patterns) {
                         .arg(hits)
                         .arg(matchedFiles)
                         .arg(scanned)
-                        .arg(hits >= limit ? " (stopped at limit)" : "");
+                        .arg(cancelled           ? " (stopped)"
+                             : hits >= limit     ? " (stopped at limit)"
+                                                 : "");
+  if (slow)
+    summary += QString("; %1 file(s) skipped: too slow").arg(slow);
   resultsDock->setWindowTitle("Search results — " + summary);
   resultsDock->show();
   statusBar()->showMessage(summary, 6000);
@@ -1522,12 +1581,20 @@ void Window::bookmark(bool next, bool previous) {
       e->send(SCI_GOTOLINE, found);
   }
 }
+// Skipped while the dock is hidden (rebuilt when it is shown again) and
+// bounded for huge documents: lines are read one at a time from Scintilla
+// instead of copying the whole buffer into a QString.
 void Window::rebuildOutline() {
+  if (!outlineDock->isVisibleTo(this)) {
+    outlineStale = true;
+    return;
+  }
+  outlineStale = false;
+  ++outlineBuilds;
   outline->clear();
   auto *t = current();
   if (!t)
     return;
-  QString text = QString::fromUtf8(t->text());
   QRegularExpression expr(
       t->language == "python"
           ? "^\\s*(?:async\\s+)?(?:def|class)\\s+([A-Za-z_]\\w*)"
@@ -1536,15 +1603,23 @@ void Window::rebuildOutline() {
           : "^\\s*(?:(?:export|public|private|static|async|const|let|function|"
             "class|struct|void|int|auto|double|float|bool)\\s+)+([\\w:]+)\\s*(?"
             ":\\(|[{:])");
-  int line = 0;
-  for (const auto &s : text.split('\n')) {
-    auto m = expr.match(s);
+  const int maxLines = 50000, maxLineBytes = 1000;
+  const int lines = qMin<int>(t->primary->send(SCI_GETLINECOUNT), maxLines);
+  QByteArray buffer;
+  for (int line = 0; line < lines; ++line) {
+    const int length = int(t->primary->send(SCI_LINELENGTH, line));
+    if (length <= 0 || length > maxLineBytes)
+      continue; // blank, or minified/generated: not a declaration
+    buffer.resize(length);
+    t->primary->send(SCI_GETLINE, line, reinterpret_cast<sptr_t>(buffer.data()));
+    auto m = expr.match(QString::fromUtf8(buffer.constData(), length));
     if (m.hasMatch()) {
-      auto *i = new QListWidgetItem(m.captured(1), outline);
+      auto *i = new QListWidgetItem(m.captured(1).trimmed(), outline);
       i->setData(Qt::UserRole, line);
     }
-    ++line;
   }
+  if (t->primary->send(SCI_GETLINECOUNT) > maxLines)
+    outline->addItem("… outline limited to the first 50000 lines");
 }
 void Window::checkDisk() {
   for (int i = 0; i < tabs->count(); ++i) {
@@ -1586,11 +1661,14 @@ void Window::playMacro() {
   }
   e->send(SCI_ENDUNDOACTION);
 }
-void Window::saveSession(const QString &path) {
+void Window::saveSession(const QString &path, bool onlyIfChanged) {
   QJsonArray docs;
   for (int i = 0; i < tabs->count(); ++i) {
     auto *t = static_cast<EditorTab *>(tabs->widget(i));
-    auto o = t->data.json(t->text(), t->dirty());
+    // Only dirty/untitled tabs need their text (and its compression).
+    const bool dirty = t->dirty();
+    auto o = t->data.json(dirty, t->data.needsBackup(dirty) ? t->text()
+                                                              : QByteArray());
     o["language"] = t->language;
     o["cursor"] = int(t->focused->send(SCI_GETCURRENTPOS));
     o["firstLine"] = int(t->focused->send(SCI_GETFIRSTVISIBLELINE));
@@ -1598,20 +1676,25 @@ void Window::saveSession(const QString &path) {
     o["eol"] = int(t->primary->send(SCI_GETEOLMODE));
     docs << o;
   }
+  const auto b = QJsonDocument(QJsonObject{{"version", 1},
+                                           {"documents", docs},
+                                           {"active", tabs->currentIndex()}})
+                     .toJson();
+  const QByteArray digest = QCryptographicHash::hash(b, QCryptographicHash::Sha1);
+  if (onlyIfChanged && digest == lastSessionHash && QFile::exists(path))
+    return; // nothing changed since the last snapshot
   QSaveFile f(path);
   if (f.open(QIODevice::WriteOnly)) {
     f.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
-    auto b = QJsonDocument(QJsonObject{{"version", 1},
-                                       {"documents", docs},
-                                       {"active", tabs->currentIndex()}})
-                 .toJson();
-    if (f.write(b) == b.size())
-      f.commit();
+    if (f.write(b) == b.size() && f.commit()) {
+      lastSessionHash = digest;
+      ++sessionWrites;
+    }
   }
 }
 void Window::snapshot() {
   if (!testing)
-    saveSession(sessionPath);
+    saveSession(sessionPath, true);
 }
 bool Window::restoreSession(const QString &path) {
   QFile f(path);
