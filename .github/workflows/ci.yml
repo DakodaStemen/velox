@@ -7,20 +7,42 @@ on:
 
 jobs:
   build-and-test:
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
     container: archlinux:latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Qt 5
+            qt: 5
+            packages: qt5-base qt5-svg
+          - name: Qt 6
+            qt: 6
+            packages: qt6-base qt6-svg
+          # Catches memory errors and undefined behavior, which the C++ code
+          # (and the Scintilla it embeds) would otherwise only show in the field.
+          - name: Qt 5 with AddressSanitizer and UBSan
+            qt: 5
+            packages: qt5-base qt5-svg
+            sanitize: 1
     steps:
       - name: Install dependencies
-        run: pacman -Syu --noconfirm --needed base-devel qt5-base qt5-svg desktop-file-utils appstream git
+        run: pacman -Syu --noconfirm --needed base-devel ${{ matrix.packages }} desktop-file-utils appstream git
 
       - uses: actions/checkout@v4
 
       - name: Build
+        env:
+          QT: ${{ matrix.qt }}
+          SANITIZE: ${{ matrix.sanitize || 0 }}
         run: JOBS=$(nproc) ./build.sh
 
       - name: Test
         env:
           QT_QPA_PLATFORM: offscreen
+          ASAN_OPTIONS: detect_leaks=0
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
         run: ./run.sh --self-test
 
       - name: Validate desktop metadata

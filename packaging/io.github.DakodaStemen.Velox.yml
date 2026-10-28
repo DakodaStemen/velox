@@ -1,0 +1,28 @@
+# Flatpak manifest. Build from the repository root:
+#   flatpak-builder --user --install --force-clean build-flatpak packaging/io.github.DakodaStemen.Velox.yml
+# Needs flatpak-builder and the org.kde.Sdk//6.9 runtime; bump runtime-version
+# to the newest KDE runtime when releasing. Not yet built or tested.
+app-id: io.github.DakodaStemen.Velox
+runtime: org.kde.Platform
+runtime-version: '6.9'
+sdk: org.kde.Sdk
+command: velox
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  # An editor opens and saves files anywhere the user can; the file chooser
+  # portal alone cannot give it atomic saves next to the original or its
+  # recovery and external-change checks.
+  - --filesystem=home
+  - --talk-name=org.freedesktop.portal.Desktop
+modules:
+  - name: velox
+    buildsystem: simple
+    build-commands:
+      - QT=6 PREFIX=/app JOBS=${FLATPAK_BUILDER_N_JOBS} ./build.sh
+      - make -C build/app INSTALL_ROOT= install
+    sources:
+      - type: dir
+        path: ..
