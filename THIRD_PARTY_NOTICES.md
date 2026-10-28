@@ -26,6 +26,12 @@ Copyright (C) 2003 Don Ho and contributors. GNU General Public License, version 
 `LexUser.cxx` was modified for Velox to remove a platform-specific header so that it builds on
 Linux.
 
+## Lexilla modification
+
+`vendor/lexilla/lexers/LexRegistry.cxx` was modified for Velox: the line-continuation check uses
+`SafeGetCharAt` instead of `operator[]`, which read before the start of the buffer on the first lines
+of a file (found with UBSan). The rest of Lexilla is unmodified.
+
 ## Regular expression search engine
 
 `vendor/boostregex/`: the regex integration for Scintilla.
