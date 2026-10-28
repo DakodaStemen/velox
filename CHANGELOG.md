@@ -13,6 +13,8 @@ All notable changes to this project are documented in this file. Versions follow
 ### Added
 - CI: Ubuntu 24.04 build, ASan + UBSan build (`CONFIG+=sanitizer`), version consistency check, least-privilege permissions, pinned actions and Dependabot updates.
 - Tag-triggered release workflow that publishes a source tarball with notes from this changelog.
+### Fixed
+- 16 languages (ActionScript, ASP, AutoIt, Baan C, COBOL, Fortran 77, Go, JavaScript (js), JSON5, JSP, NFO, PHP, PostScript, RC, Scheme, Swift) had no matching Lexilla lexer and rendered as plain text; they now map to the correct lexers (NFO stays plain text). JSON5 allows comments. A self-test guards against future regressions.
 
 ## [0.1.0] - 2026-10-28
 

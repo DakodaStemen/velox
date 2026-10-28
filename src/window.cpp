@@ -652,7 +652,25 @@ void Window::loadLanguages() {
                                    {"makefile", "makefile"},
                                    {"shell", "bash"},
                                    {"caml", "caml"},
-                                   {"json", "json"}};
+                                   {"json", "json"},
+                                   // Languages without a Lexilla lexer of
+                                   // their own; "nfo" stays plain text.
+                                   {"actionscript", "cpp"},
+                                   {"go", "cpp"},
+                                   {"swift", "cpp"},
+                                   {"rc", "cpp"},
+                                   {"javascript.js", "cpp"},
+                                   {"php", "hypertext"},
+                                   {"asp", "hypertext"},
+                                   {"jsp", "hypertext"},
+                                   {"scheme", "lisp"},
+                                   {"postscript", "ps"},
+                                   {"autoit", "au3"},
+                                   {"fortran77", "f77"},
+                                   {"baanc", "baan"},
+                                   {"cobol", "COBOL"},
+                                   {"json5", "json"},
+                                   {"nfo", "null"}};
     if (aliases.contains(l.name))
       l.lexer = aliases[l.name];
     auto keys = n.elementsByTagName("Keywords");
@@ -933,7 +951,7 @@ void Window::applyLanguage(EditorTab *t, const QString &name) {
       t->primary->sends(SCI_SETKEYWORDS, i,
                         i < l.keywords.size() ? l.keywords[i].constData()
                                               : "");
-  if (t->language == "json")
+  if (t->language == "json" || t->language == "json5")
     t->primary->sends(SCI_SETPROPERTY,
                       reinterpret_cast<uptr_t>("lexer.json.allow.comments"),
                       "1");
@@ -1097,6 +1115,16 @@ void Window::applyTheme(EditorTab *t) {
     QString styleName = t->language;
     if (styleName == "c")
       styleName = "cpp";
+    // Languages the theme has no LexerType for borrow their base language's.
+    static const QHash<QString, QString> styleFallback{{"jsp", "html"},
+                                                       {"json5", "json"}};
+    if (styleFallback.contains(styleName)) {
+      bool found = false;
+      for (int i = 0; i < lexers.size() && !found; ++i)
+        found = lexers.at(i).toElement().attribute("name") == styleName;
+      if (!found)
+        styleName = styleFallback[styleName];
+    }
     for (int i = 0; i < lexers.size(); ++i) {
       auto lexer = lexers.at(i).toElement();
       if (lexer.attribute("name") != styleName)
