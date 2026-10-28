@@ -5,6 +5,7 @@
 #include "SciLexer.h"
 #include "udleditor.h"
 #include "window.h"
+#include <QTextCodec>
 #include <QtTest>
 #include <sys/stat.h>
 #include <unistd.h>
