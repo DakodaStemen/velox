@@ -102,7 +102,7 @@ static ScintillaEditBase *makeEditor(QWidget *parent) {
   e->send(SCI_SETMARGINMASKN, 1, 1);
   e->send(SCI_SETMARGINSENSITIVEN, 1, 1);
   e->send(SCI_MARKERDEFINE, 0, SC_MARK_CIRCLE);
-  e->send(SCI_MARKERSETBACK, 0, colour(QColor("#e1ad67")));
+  e->send(SCI_MARKERSETBACK, 0, colour(QColor("#4aa8f5")));
   e->send(SCI_SETMARGINTYPEN, 2, SC_MARGIN_SYMBOL);
   e->send(SCI_SETMARGINWIDTHN, 2, 17);
   e->send(SCI_SETMARGINMASKN, 2, SC_MASK_FOLDERS);

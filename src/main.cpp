@@ -75,7 +75,7 @@ int main(int argc, char **argv) {
   p.setColor(QPalette::Text, QColor("#e0e6ee"));
   p.setColor(QPalette::Button, QColor("#303946"));
   p.setColor(QPalette::ButtonText, QColor("#e0e6ee"));
-  p.setColor(QPalette::Highlight, QColor("#346a95"));
+  p.setColor(QPalette::Highlight, QColor("#2b62b8"));
   p.setColor(QPalette::HighlightedText, Qt::white);
   p.setColor(QPalette::ToolTipBase, QColor("#303946"));
   p.setColor(QPalette::ToolTipText, Qt::white);
@@ -84,7 +84,7 @@ int main(int argc, char **argv) {
       "QMenuBar{padding:5px} "
       "QToolBar{spacing:7px;padding:7px;border-bottom:1px solid #394352} "
       "QTabBar::tab{padding:10px 18px} QTabBar::tab:selected{border-bottom:2px "
-      "solid #e0874a} QTabBar::close-button{image:url(:/tab-close.svg)} "
+      "solid #4aa8f5} QTabBar::close-button{image:url(:/tab-close.svg)} "
       "QTabBar::close-button:hover{background:#394352;border-radius:3px} "
       "QStatusBar{padding:4px} QComboBox{padding:4px} "
       "QPushButton{padding:6px 12px} QLineEdit{padding:6px} "
