@@ -10,6 +10,9 @@
 #ifdef VELOX_SELFTEST
 int selfTest(QApplication &app);
 #endif
+#ifdef VELOX_DEMO
+int runDemo(Window &window, const QString &dir);
+#endif
 // Prefer the per-user runtime directory (0700, owned by us) over the shared,
 // world-writable /tmp for the socket and lock file.
 static QString runtimeDir() {
@@ -85,6 +88,9 @@ int main(int argc, char **argv) {
   parser.addOption({"fresh", "Start without restoring a previous session"});
   parser.addOption({"new-instance",
                     "Open a separate window instead of reusing a running one"});
+#ifdef VELOX_DEMO
+  parser.addOption({"demo", "Render the README animation frames", "dir"});
+#endif
   parser.addOption({"screenshot", "Write a window preview and exit", "path"});
   parser.addPositionalArgument("files", "Files to open; FILE:LINE[:COLUMN] jumps to a position",
                                "[files…]");
@@ -95,10 +101,17 @@ int main(int argc, char **argv) {
     return selfTest(app);
   }
 #endif
+#ifdef VELOX_DEMO
+  const bool demo = parser.isSet("demo");
+  if (demo)
+    QStandardPaths::setTestModeEnabled(true); // isolated profile
+#else
+  const bool demo = false;
+#endif
   QStringList files;
   for (const auto &path : parser.positionalArguments())
     files << QFileInfo(path).absoluteFilePath();
-  bool shot = parser.isSet("screenshot");
+  bool shot = parser.isSet("screenshot") || demo;
   bool shared = !shot && !parser.isSet("new-instance");
   // The lock makes "is one running? if not, become it" atomic, so several
   // simultaneous launches still end up in a single window.
@@ -137,6 +150,10 @@ int main(int argc, char **argv) {
       "QPushButton{padding:6px 12px} QLineEdit{padding:6px} "
       "QDockWidget::title{padding:8px} QSplitter::handle{background:#394352}");
   Window window(shot, shared);
+#ifdef VELOX_DEMO
+  if (demo)
+    return runDemo(window, parser.value("demo"));
+#endif
   if (!parser.isSet("fresh") && !shot)
     window.restore();
   for (const auto &path : files)

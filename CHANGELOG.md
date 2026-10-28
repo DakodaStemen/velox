@@ -5,6 +5,9 @@ All notable changes to this project are documented in this file. Versions follow
 
 ## [Unreleased]
 
+### Added
+- README animation (`docs/demo.gif`), rendered from the real window by an opt-in demo script (`CONFIG+=demo` / `DEMO=1 ./build.sh`, `velox --demo DIR`) and the manual `Demo` workflow. Release and default builds do not contain it.
+
 ### Changed
 - The test suite and `--self-test` are now a build option (`CONFIG+=selftest`); `build.sh` enables it by default and `SELFTEST=0` (used by the PKGBUILDs) produces a production binary without Qt Test.
 - The version is defined once in `velox.pro`; `scripts/check-version.sh` checks it against the PKGBUILD, AppStream metadata and CHANGELOG.
