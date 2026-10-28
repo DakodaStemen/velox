@@ -2,9 +2,13 @@
 // Copyright (C) 2026 The Velox Authors
 #include "window.h"
 #include <QtNetwork>
+#ifdef VELOX_SELFTEST
 #include <QtTest>
+#endif
 #include <unistd.h>
+#ifdef VELOX_SELFTEST
 int selfTest(QApplication &app);
+#endif
 static QString instanceName() {
   return QString("velox-%1").arg(getuid());
 }
@@ -26,7 +30,7 @@ static bool forwardToRunning(const QStringList &files) {
 int main(int argc, char **argv) {
   QApplication app(argc, argv);
   QCoreApplication::setApplicationName("velox");
-  QCoreApplication::setApplicationVersion("0.1.0");
+  QCoreApplication::setApplicationVersion(QStringLiteral(VELOX_VERSION));
   QGuiApplication::setApplicationDisplayName("Velox");
   QGuiApplication::setDesktopFileName("io.github.DakodaStemen.Velox");
   QApplication::setWindowIcon(
@@ -36,18 +40,22 @@ int main(int argc, char **argv) {
       "Velox — a fast native text editor built on Scintilla and Lexilla");
   parser.addHelpOption();
   parser.addVersionOption();
+#ifdef VELOX_SELFTEST
   parser.addOption(
       {"self-test", "Run integration tests in an isolated profile"});
+#endif
   parser.addOption({"fresh", "Start without restoring a previous session"});
   parser.addOption({"new-instance",
                     "Open a separate window instead of reusing a running one"});
   parser.addOption({"screenshot", "Write a window preview and exit", "path"});
   parser.addPositionalArgument("files", "Files to open", "[files…]");
   parser.process(app);
+#ifdef VELOX_SELFTEST
   if (parser.isSet("self-test")) {
     QStandardPaths::setTestModeEnabled(true);
     return selfTest(app);
   }
+#endif
   QStringList files;
   for (const auto &path : parser.positionalArguments())
     files << QFileInfo(path).absoluteFilePath();

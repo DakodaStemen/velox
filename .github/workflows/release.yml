@@ -1,0 +1,51 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    permissions:
+      contents: write
+    steps:
+      - name: Install dependencies
+        run: pacman -Syu --noconfirm --needed base-devel qt5-base qt5-svg git github-cli
+
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Mark workspace safe
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Check tag matches version
+        run: |
+          scripts/check-version.sh
+          ver=$(sed -n 's/^VERSION *= *//p' velox.pro | head -n1 | tr -d ' ')
+          [ "${GITHUB_REF_NAME}" = "v$ver" ] || { echo "::error::tag $GITHUB_REF_NAME != v$ver"; exit 1; }
+
+      - name: Build
+        run: JOBS=$(nproc) ./build.sh
+
+      - name: Test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ./run.sh --self-test
+
+      - name: Create source tarball
+        run: git archive --format=tar.gz --prefix="velox-${GITHUB_REF_NAME#v}/" -o "velox-${GITHUB_REF_NAME#v}.tar.gz" "$GITHUB_REF_NAME"
+
+      - name: Extract release notes
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          awk -v v="$ver" '/^## \[/{ if (found) exit; if (index($0, "[" v "]")) { found=1; next } } found' CHANGELOG.md > notes.md
+          [ -s notes.md ] || { echo "::error::no CHANGELOG section for $ver"; exit 1; }
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" "velox-${GITHUB_REF_NAME#v}.tar.gz" --title "Velox ${GITHUB_REF_NAME#v}" --notes-file notes.md --verify-tag

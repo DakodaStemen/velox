@@ -10,9 +10,9 @@ contributors.
 | `src/main.cpp` | Startup, command line, application style, and single-window handoff over a local socket |
 | `src/window.{h,cpp}` | Main window: tabs, menus, search, find in files, languages, themes, sessions, macros |
 | `src/document.{h,cpp}` | File I/O: encoding detection, BOMs, safe saving, external change detection |
-| `tests/integration.cpp` | Integration tests, compiled into the binary and run with `--self-test` |
+| `tests/integration.cpp` | Integration tests, compiled in only when `CONFIG+=selftest` is set (`build.sh` default; `SELFTEST=0` disables), run with `--self-test` |
 | `share/` | Language definitions, themes and bundled user-defined languages, installed to `<prefix>/share/velox` |
-| `packaging/` | Desktop entry, icon, AppStream metadata, Arch `PKGBUILD` |
+| `packaging/` | Desktop entry, icon, AppStream metadata, Arch `PKGBUILD` (in-tree) and `aur/PKGBUILD` (release tarball) |
 | `vendor/` | Third-party code: Scintilla (Qt backend), Lexilla lexers, Boost.Regex search engine |
 
 ## Editing model
