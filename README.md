@@ -4,7 +4,7 @@
 
 <h1 align="center">Velox</h1>
 
-<p align="center"><em>velox</em>, Latin for “swift”. A fast, lightweight native text and code editor for Linux.</p>
+<p align="center">A fast, lightweight native text and code editor for Linux.</p>
 
 <p align="center">
   <a href="https://github.com/DakodaStemen/velox/actions/workflows/ci.yml"><img src="https://github.com/DakodaStemen/velox/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
