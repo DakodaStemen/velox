@@ -14,11 +14,28 @@ concurrency:
 
 jobs:
   build-and-test:
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
     container: archlinux:latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Arch (Qt 5)
+            qt: 5
+            packages: qt5-base qt5-svg
+          - name: Arch (Qt 6)
+            qt: 6
+            packages: qt6-base qt6-svg qt6-5compat
+          # Catches memory errors and undefined behavior, which the C++ code
+          # (and the Scintilla it embeds) would otherwise only show in the field.
+          - name: Arch (Qt 5, ASan + UBSan)
+            qt: 5
+            packages: qt5-base qt5-svg
+            sanitize: 1
     steps:
       - name: Install dependencies
-        run: pacman -Syu --noconfirm --needed base-devel qt5-base qt5-svg desktop-file-utils appstream git
+        run: pacman -Syu --noconfirm --needed base-devel ${{ matrix.packages }} desktop-file-utils appstream git
 
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
@@ -26,11 +43,16 @@ jobs:
         run: scripts/check-version.sh
 
       - name: Build
+        env:
+          QT: ${{ matrix.qt }}
+          SANITIZE: ${{ matrix.sanitize || 0 }}
         run: JOBS=$(nproc) ./build.sh
 
       - name: Test
         env:
           QT_QPA_PLATFORM: offscreen
+          ASAN_OPTIONS: detect_leaks=0
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
         run: ./run.sh --self-test
 
       - name: Validate desktop metadata
@@ -47,27 +69,6 @@ jobs:
           else
             echo "::error::--self-test is present in a SELFTEST=0 build"; exit 1
           fi
-
-  sanitizers:
-    # Not yet verified green; findings are reported but do not block until triaged.
-    runs-on: ubuntu-latest
-    container: archlinux:latest
-    continue-on-error: true
-    steps:
-      - name: Install dependencies
-        run: pacman -Syu --noconfirm --needed base-devel qt5-base qt5-svg git
-
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
-      - name: Build with ASan + UBSan
-        run: SANITIZE=1 JOBS=$(nproc) ./build.sh
-
-      - name: Test
-        env:
-          QT_QPA_PLATFORM: offscreen
-          ASAN_OPTIONS: detect_leaks=0
-          UBSAN_OPTIONS: print_stacktrace=1
-        run: ./run.sh --self-test
 
   ubuntu:
     runs-on: ubuntu-24.04

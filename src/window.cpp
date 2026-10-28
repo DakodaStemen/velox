@@ -2,6 +2,7 @@
 // Copyright (C) 2026 The Velox Authors
 // Portions adapted from GPL-3.0-or-later code; see THIRD_PARTY_NOTICES.md.
 #include "window.h"
+#include "udleditor.h"
 #include "ILexer.h"
 #include "Lexilla.h"
 #include "SciLexer.h"
@@ -144,6 +145,35 @@ static ScintillaEditBase *makeEditor(QWidget *parent) {
   e->send(SCI_INDICSETUNDER, markIndicator, 1);
   return e;
 }
+void Preferences::load(const QSettings &s) {
+  const Preferences d;
+  font = s.value("editor/font", d.font).toString();
+  fontSize = qBound(6, s.value("editor/fontSize", d.fontSize).toInt(), 72);
+  tabWidth = qBound(1, s.value("editor/tabWidth", d.tabWidth).toInt(), 16);
+  spaces = s.value("editor/spaces", d.spaces).toBool();
+  lineNumbers = s.value("editor/lineNumbers", d.lineNumbers).toBool();
+  caretLine = s.value("editor/caretLine", d.caretLine).toBool();
+  wrap = s.value("editor/wrap", d.wrap).toBool();
+  whitespace = s.value("editor/whitespace", d.whitespace).toBool();
+  autoIndent = s.value("editor/autoIndent", d.autoIndent).toBool();
+  completion = s.value("editor/completion", d.completion).toBool();
+  trimOnSave = s.value("save/trimTrailingWhitespace", d.trimOnSave).toBool();
+  finalNewline = s.value("save/finalNewline", d.finalNewline).toBool();
+}
+void Preferences::store(QSettings &s) const {
+  s.setValue("editor/font", font);
+  s.setValue("editor/fontSize", fontSize);
+  s.setValue("editor/tabWidth", tabWidth);
+  s.setValue("editor/spaces", spaces);
+  s.setValue("editor/lineNumbers", lineNumbers);
+  s.setValue("editor/caretLine", caretLine);
+  s.setValue("editor/wrap", wrap);
+  s.setValue("editor/whitespace", whitespace);
+  s.setValue("editor/autoIndent", autoIndent);
+  s.setValue("editor/completion", completion);
+  s.setValue("save/trimTrailingWhitespace", trimOnSave);
+  s.setValue("save/finalNewline", finalNewline);
+}
 EditorTab::EditorTab(QWidget *parent) : QWidget(parent) {
   auto *layout = new QVBoxLayout(this);
   layout->setContentsMargins(0, 0, 0, 0);
@@ -231,6 +261,11 @@ Window::Window(bool test, bool sharedInstance)
   filters = new QLineEdit("*");
   filters->setPlaceholderText("Filters, e.g. *.cpp *.h");
   filters->setMaximumWidth(220);
+  filesEncoding = new QComboBox;
+  filesEncoding->addItem("UTF-8 / UTF-16 / UTF-32");
+  filesEncoding->addItems(legacyEncodings());
+  filesEncoding->setToolTip(
+      "Encoding assumed for files without a byte order mark");
   matchCase = new QCheckBox("Match case");
   wholeWord = new QCheckBox("Whole word");
   regex = new QCheckBox("Regular expression");
@@ -271,7 +306,7 @@ Window::Window(bool test, bool sharedInstance)
                                                 if (!p.isEmpty())
                                                   folder->setText(p);
                                               }),
-                               filters,
+                               filters, filesEncoding,
                                findFilesButton = button("Find in files", [this] {
                                  findInFiles(folder->text(), filters->text());
                                }),
@@ -352,7 +387,8 @@ Window::Window(bool test, bool sharedInstance)
   languageChoice->addItems(languages.keys());
   statusBar()->addPermanentWidget(languageChoice);
   encodingChoice = new QComboBox;
-  encodingChoice->addItems({"UTF-8", "UTF-8 BOM", "UTF-16LE", "UTF-16BE"});
+  encodingChoice->addItems({"UTF-8", "UTF-8 BOM", "UTF-16LE", "UTF-16BE",
+                            "UTF-32LE", "UTF-32BE"});
   encodingChoice->addItems(legacyEncodings());
   encodingChoice->setToolTip("Encoding used when saving");
   statusBar()->addPermanentWidget(encodingChoice);
@@ -386,6 +422,8 @@ Window::Window(bool test, bool sharedInstance)
             t->data.bom = name == "UTF-8 BOM"  ? QByteArray::fromHex("efbbbf")
                           : name == "UTF-16LE" ? QByteArray::fromHex("fffe")
                           : name == "UTF-16BE" ? QByteArray::fromHex("feff")
+                          : name == "UTF-32LE" ? QByteArray::fromHex("fffe0000")
+                          : name == "UTF-32BE" ? QByteArray::fromHex("0000feff")
                                                : QByteArray();
             t->metadataDirty = true;
             refresh();
@@ -414,6 +452,7 @@ Window::Window(bool test, bool sharedInstance)
   if (!testing)
     diskTimer.start(3000);
   recent = settings.value("recent").toStringList();
+  prefs.load(settings);
   buildMenus();
   if (!testing)
     restoreGeometry(settings.value("geometry").toByteArray());
@@ -497,6 +536,7 @@ void Window::buildMenus() {
     if (DocumentData::read(t->data.path, d, error, t->data.encoding)) {
       QScopedValueRollback<bool> quiet(suppressMacro, true);
       t->data = d;
+      t->large = d.utf8.size() > largeFileSize;
       t->setText(d.utf8);
       dismissedChanges.remove(t);
       applyLanguage(t, t->language);
@@ -539,29 +579,22 @@ void Window::buildMenus() {
          [this] { send(SCI_UPPERCASE); });
   action(e, "Lowercase", QKeySequence("Ctrl+U"),
          [this] { send(SCI_LOWERCASE); });
-  action(e, "Trim trailing whitespace", {}, [this] {
-    auto *t = current();
-    if (!t)
-      return;
-    auto *ed = t->focused;
-    ed->send(SCI_BEGINUNDOACTION);
-    for (int line = int(ed->send(SCI_GETLINECOUNT)) - 1; line >= 0; --line) {
-      auto start = ed->send(SCI_POSITIONFROMLINE, line),
-           end = ed->send(SCI_GETLINEENDPOSITION, line), trim = end;
-      while (trim > start) {
-        int c = ed->send(SCI_GETCHARAT, trim - 1);
-        if (c != ' ' && c != '\t')
-          break;
-        --trim;
-      }
-      if (trim < end) {
-        ed->send(SCI_SETTARGETSTART, trim);
-        ed->send(SCI_SETTARGETEND, end);
-        ed->sends(SCI_REPLACETARGET, 0, "");
-      }
-    }
-    ed->send(SCI_ENDUNDOACTION);
-  });
+  action(e, "Trim trailing whitespace", {},
+         [this] { trimTrailingWhitespace(current()); });
+  e->addSeparator();
+  action(e, "Preferences…", QKeySequence("Ctrl+,"), [this] { showPreferences(); });
+  e->addSeparator();
+  action(e, "Toggle comment", QKeySequence("Ctrl+/"), [this] { toggleComment(); });
+  action(e, "Move line up", QKeySequence("Alt+Up"),
+         [this] { send(SCI_MOVESELECTEDLINESUP); });
+  action(e, "Move line down", QKeySequence("Alt+Down"),
+         [this] { send(SCI_MOVESELECTEDLINESDOWN); });
+  action(e, "Join lines", QKeySequence("Ctrl+J"), [this] { joinLines(); });
+  auto *lines = e->addMenu("Sort lines");
+  action(lines, "Ascending", {}, [this] { sortLines(Ascending); });
+  action(lines, "Descending", {}, [this] { sortLines(Descending); });
+  action(lines, "Ascending, ignore case", {}, [this] { sortLines(IgnoreCase); });
+  action(e, "Remove duplicate lines", {}, [this] { removeDuplicateLines(); });
   auto *s = menuBar()->addMenu("&Search");
   action(s, "Find…", QKeySequence::Find, [this] { showSearch(); });
   action(s, "Replace…", QKeySequence("Ctrl+H"),
@@ -601,7 +634,8 @@ void Window::buildMenus() {
             ed->send(SCI_SETWRAPMODE, mode);
         }
       },
-      true);
+      true)
+      ->setChecked(prefs.wrap);
   action(
       v, "Show whitespace", {},
       [this] {
@@ -614,7 +648,8 @@ void Window::buildMenus() {
             ed->send(SCI_SETVIEWWS, mode);
         }
       },
-      true);
+      true)
+      ->setChecked(prefs.whitespace);
   action(v, "Zoom in", QKeySequence::ZoomIn, [this] { send(SCI_ZOOMIN); });
   action(v, "Zoom out", QKeySequence::ZoomOut, [this] { send(SCI_ZOOMOUT); });
   action(v, "Reset zoom", QKeySequence("Ctrl+0"),
@@ -624,6 +659,16 @@ void Window::buildMenus() {
   v->addAction(resultsDock->toggleViewAction());
   action(v, "Fullscreen", QKeySequence("F11"),
          [this] { isFullScreen() ? showNormal() : showFullScreen(); });
+  auto *lang = menuBar()->addMenu("&Language");
+  action(lang, "Define custom language…", {}, [this] { editUserLanguage(); });
+  auto *editLanguage = lang->addMenu("Edit custom language");
+  connect(editLanguage, &QMenu::aboutToShow, this, [this, editLanguage] {
+    editLanguage->clear();
+    for (const QString &name : UdlSpec::saved().keys())
+      editLanguage->addAction(name, [this, name] { editUserLanguage(name); });
+    if (editLanguage->isEmpty())
+      editLanguage->addAction("No custom languages yet")->setEnabled(false);
+  });
   auto *m = menuBar()->addMenu("&Macro");
   auto *rec = action(
       m, "Start / stop recording", QKeySequence("Ctrl+Shift+R"),
@@ -786,6 +831,8 @@ EditorTab *Window::newDocument(const QByteArray &text) {
           (ch == '\r' && ed->send(SCI_GETEOLMODE) == SC_EOL_CR)) {
         // '\r' only counts in CR mode; in CRLF mode the '\n' that follows
         // does the indenting, so handling both would indent twice.
+        if (!prefs.autoIndent)
+          return;
         QScopedValueRollback<bool> quiet(suppressMacro, true);
         int line = ed->send(SCI_LINEFROMPOSITION, ed->send(SCI_GETCURRENTPOS));
         if (line > 0) {
@@ -793,7 +840,7 @@ EditorTab *Window::newDocument(const QByteArray &text) {
           ed->send(SCI_SETLINEINDENTATION, line, indent);
           ed->send(SCI_GOTOPOS, ed->send(SCI_GETLINEINDENTPOSITION, line));
         }
-      } else if (ch >= 32 && ch != 127 &&
+      } else if (prefs.completion && ch >= 32 && ch != 127 &&
                  (ch == '_' || QChar::isLetterOrNumber(uint(ch)))) {
         // In UTF-8 mode Scintilla reports the decoded code point, so non-ASCII
         // letters compare correctly via QChar; control chars stay excluded.
@@ -844,6 +891,7 @@ EditorTab *Window::newDocument(const QByteArray &text) {
     ed->send(SCI_STARTRECORD);
   }
   t->setText(text, !text.isEmpty());
+  applyPreferences(t);
   applyLanguage(t, "normal");
   t->primary->setFocus();
   refresh();
@@ -861,8 +909,8 @@ bool Window::openFile(const QString &path, const QString &fallback) {
       return true;
     }
   }
-  if (QFileInfo(path).size() > 128 * 1024 * 1024) {
-    report("Files over 128 MiB are not supported by this first release.");
+  if (QFileInfo(path).size() > maxFileSize) {
+    report("Files over 1 GiB are not supported.");
     return false;
   }
   DocumentData d;
@@ -894,6 +942,8 @@ bool Window::openFile(const QString &path, const QString &fallback) {
     blank = nullptr;
   auto *t = newDocument();
   t->data = d;
+  t->large = d.utf8.size() > largeFileSize;
+  applyPreferences(t);
   t->setText(d.utf8);
   tabs->setTabToolTip(tabs->indexOf(t), d.path);
   if (blank) {
@@ -961,6 +1011,10 @@ bool Window::save(EditorTab *t, bool saveAs) {
       }
     }
   }
+  if (prefs.trimOnSave)
+    trimTrailingWhitespace(t);
+  if (prefs.finalNewline)
+    ensureFinalNewline(t);
   QString error;
   if (!t->data.write(t->text(), path, error)) {
     report(error);
@@ -1005,7 +1059,16 @@ bool Window::closeTab(int index) {
 void Window::applyLanguage(EditorTab *t, const QString &name) {
   if (!t)
     return;
-  t->language = languages.contains(name) ? name : "normal";
+  t->language = languages.contains(name) && !t->large ? name : "normal";
+  if (t->large && name != "normal")
+    statusBar()->showMessage(
+        "Syntax highlighting is off for files over 32 MiB", 5000);
+  for (auto *ed : {t->primary, t->secondary}) {
+    ed->send(SCI_SETAUTOMATICFOLD, t->large ? 0 : SC_AUTOMATICFOLD_SHOW |
+                                                      SC_AUTOMATICFOLD_CLICK |
+                                                      SC_AUTOMATICFOLD_CHANGE);
+    ed->send(SCI_SETMARGINWIDTHN, 2, t->large ? 0 : 17);
+  }
   const auto l = languages.value(t->language);
   auto *lexer = CreateLexer(l.lexer.toUtf8().constData());
   if (!lexer)
@@ -1127,8 +1190,8 @@ void Window::applyTheme(EditorTab *t) {
   for (auto *e : {t->primary, t->secondary}) {
     e->send(SCI_STYLESETFORE, STYLE_DEFAULT, colour(fg));
     e->send(SCI_STYLESETBACK, STYLE_DEFAULT, colour(bg));
-    e->sends(SCI_STYLESETFONT, STYLE_DEFAULT, "DejaVu Sans Mono");
-    e->send(SCI_STYLESETSIZE, STYLE_DEFAULT, 11);
+    e->sends(SCI_STYLESETFONT, STYLE_DEFAULT, prefs.font.toUtf8().constData());
+    e->send(SCI_STYLESETSIZE, STYLE_DEFAULT, prefs.fontSize);
     e->send(SCI_STYLECLEARALL);
     e->send(SCI_SETCARETFORE, colour(fg));
     e->send(SCI_SETCARETLINEBACK, colour(bg.lighter(light ? 96 : 120)));
@@ -1211,6 +1274,129 @@ void Window::applyTheme(EditorTab *t) {
       }
     }
     e->send(SCI_COLOURISE, 0, -1);
+  }
+}
+// Re-reads every language definition after one was added, changed or removed.
+void Window::reloadLanguages() {
+  languages.clear();
+  completionCache.clear();
+  loadLanguages();
+  {
+    QSignalBlocker blocker(languageChoice);
+    languageChoice->clear();
+    languageChoice->addItems(languages.keys());
+  }
+  for (int i = 0; i < tabs->count(); ++i) {
+    auto *t = static_cast<EditorTab *>(tabs->widget(i));
+    applyLanguage(t, t->language);
+  }
+  refresh();
+}
+void Window::editUserLanguage(const QString &existingName) {
+  UdlSpec spec;
+  QString oldPath;
+  if (!existingName.isEmpty()) {
+    oldPath = UdlSpec::saved().value(existingName);
+    const auto langs = xml(oldPath).elementsByTagName("UserLang");
+    for (int i = 0; i < langs.size(); ++i)
+      if (langs.at(i).toElement().attribute("name") == existingName)
+        UdlSpec::fromElement(langs.at(i).toElement(), spec);
+  }
+  const bool existing = !oldPath.isEmpty();
+  UdlEditor dialog(spec, existing, this);
+  while (true) {
+    if (dialog.exec() != QDialog::Accepted)
+      return;
+    if (dialog.removed) {
+      QFile::remove(oldPath);
+      break;
+    }
+    spec = dialog.spec();
+    QString error = spec.validate(languages, existingName);
+    if (error.isEmpty())
+      spec.save(error); // leaves `error` set when writing fails
+    if (!error.isEmpty()) {
+      QMessageBox::warning(this, "Custom language", error);
+      continue;
+    }
+    if (existing && QFileInfo(oldPath).fileName() != spec.fileName())
+      QFile::remove(oldPath);
+    break;
+  }
+  reloadLanguages();
+  if (!dialog.removed && current())
+    applyLanguage(current(), spec.name);
+}
+void Window::applyPreferences(EditorTab *t) {
+  if (!t)
+    return;
+  for (auto *e : {t->primary, t->secondary}) {
+    e->send(SCI_SETTABWIDTH, prefs.tabWidth);
+    e->send(SCI_SETINDENT, prefs.tabWidth);
+    e->send(SCI_SETUSETABS, !prefs.spaces);
+    e->send(SCI_SETMARGINWIDTHN, 0, prefs.lineNumbers ? 60 : 0);
+    e->send(SCI_SETCARETLINEVISIBLE, prefs.caretLine);
+    // Wrapping a huge document makes every edit and scroll slow.
+    e->send(SCI_SETWRAPMODE, prefs.wrap && !t->large ? SC_WRAP_WORD : SC_WRAP_NONE);
+    e->send(SCI_SETVIEWWS, prefs.whitespace ? SCWS_VISIBLEALWAYS : SCWS_INVISIBLE);
+  }
+}
+void Window::showPreferences() {
+  QDialog dialog(this);
+  dialog.setWindowTitle("Preferences");
+  auto *form = new QFormLayout(&dialog);
+  auto *font = new QFontComboBox;
+  font->setFontFilters(QFontComboBox::MonospacedFonts);
+  font->setCurrentFont(QFont(prefs.font));
+  auto *size = new QSpinBox;
+  size->setRange(6, 72);
+  size->setValue(prefs.fontSize);
+  auto *tab = new QSpinBox;
+  tab->setRange(1, 16);
+  tab->setValue(prefs.tabWidth);
+  auto check = [&form](const QString &text, bool on) {
+    auto *c = new QCheckBox(text);
+    c->setChecked(on);
+    form->addRow(c);
+    return c;
+  };
+  form->addRow("Font", font);
+  form->addRow("Font size", size);
+  form->addRow("Tab width", tab);
+  auto *spaces = check("Insert spaces instead of tabs", prefs.spaces);
+  auto *autoIndent = check("Keep the previous line's indentation", prefs.autoIndent);
+  auto *completion = check("Suggest keywords while typing", prefs.completion);
+  auto *numbers = check("Show line numbers", prefs.lineNumbers);
+  auto *caret = check("Highlight the current line", prefs.caretLine);
+  auto *wrap = check("Wrap long lines", prefs.wrap);
+  auto *whitespace = check("Show whitespace", prefs.whitespace);
+  auto *trim = check("Trim trailing whitespace when saving", prefs.trimOnSave);
+  auto *newline = check("End files with a newline when saving", prefs.finalNewline);
+  auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok |
+                                       QDialogButtonBox::Cancel);
+  form->addRow(buttons);
+  connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+  connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+  if (dialog.exec() != QDialog::Accepted)
+    return;
+  prefs.font = font->currentFont().family();
+  prefs.fontSize = size->value();
+  prefs.tabWidth = tab->value();
+  prefs.spaces = spaces->isChecked();
+  prefs.autoIndent = autoIndent->isChecked();
+  prefs.completion = completion->isChecked();
+  prefs.lineNumbers = numbers->isChecked();
+  prefs.caretLine = caret->isChecked();
+  prefs.wrap = wrap->isChecked();
+  prefs.whitespace = whitespace->isChecked();
+  prefs.trimOnSave = trim->isChecked();
+  prefs.finalNewline = newline->isChecked();
+  prefs.store(settings);
+  settings.sync();
+  for (int i = 0; i < tabs->count(); ++i) {
+    auto *t = static_cast<EditorTab *>(tabs->widget(i));
+    applyPreferences(t);
+    applyTheme(t);
   }
 }
 void Window::refresh() {
@@ -1448,6 +1634,9 @@ int Window::findInFiles(const QString &root, const QString &patterns) {
   const int limit = 20000;
   const qint64 slowMs = 5000; // per-file budget for pathological patterns
   bool cancelled = false;
+  int skipped = 0;
+  const QString fallback =
+      filesEncoding->currentIndex() > 0 ? filesEncoding->currentText() : QString();
   while (it.hasNext() && hits < limit) {
     const QString path = it.next();
     if (++scanned % 64 == 0) {
@@ -1464,8 +1653,10 @@ int Window::findInFiles(const QString &root, const QString &patterns) {
       continue;
     DocumentData d;
     QString error;
-    if (!DocumentData::read(path, d, error, {}, nullptr, false))
+    if (!DocumentData::read(path, d, error, fallback, nullptr, false)) {
+      ++skipped;
       continue;
+    }
     QElapsedTimer fileTimer;
     fileTimer.start();
     scanner->send(SCI_SETTEXT, 0, reinterpret_cast<sptr_t>(d.utf8.constData()));
@@ -1500,6 +1691,7 @@ int Window::findInFiles(const QString &root, const QString &patterns) {
       hit->setData(0, Qt::UserRole, path);
       hit->setData(0, Qt::UserRole + 1, qlonglong(pos));
       hit->setData(0, Qt::UserRole + 2, qlonglong(end));
+      hit->setData(0, Qt::UserRole + 3, fallback);
       ++fileHits;
       ++hits;
       start = end > pos ? end : scanner->send(SCI_POSITIONAFTER, pos);
@@ -1522,6 +1714,7 @@ int Window::findInFiles(const QString &root, const QString &patterns) {
                                .arg(QDir(root).relativeFilePath(path))
                                .arg(fileHits));
       fileItem->setData(0, Qt::UserRole, path);
+      fileItem->setData(0, Qt::UserRole + 3, fallback);
       ++matchedFiles;
     }
   }
@@ -1535,6 +1728,9 @@ int Window::findInFiles(const QString &root, const QString &patterns) {
                         .arg(cancelled           ? " (stopped)"
                              : hits >= limit     ? " (stopped at limit)"
                                                  : "");
+  if (skipped)
+    summary += QString(", %1 skipped (binary or not valid text in the chosen encoding)")
+                   .arg(skipped);
   if (slow)
     summary += QString("; %1 file(s) skipped: too slow").arg(slow);
   resultsDock->setWindowTitle("Search results — " + summary);
@@ -1544,7 +1740,9 @@ int Window::findInFiles(const QString &root, const QString &patterns) {
 }
 void Window::openResult(QTreeWidgetItem *item) {
   const QString path = item->data(0, Qt::UserRole).toString();
-  if (path.isEmpty() || !openFile(path) || !item->parent())
+  if (path.isEmpty() ||
+      !openFile(path, item->data(0, Qt::UserRole + 3).toString()) ||
+      !item->parent())
     return;
   auto *e = current()->focused;
   e->send(SCI_SETSEL, item->data(0, Qt::UserRole + 1).toLongLong(),
@@ -1593,7 +1791,7 @@ void Window::rebuildOutline() {
   ++outlineBuilds;
   outline->clear();
   auto *t = current();
-  if (!t)
+  if (!t || t->large)
     return;
   QRegularExpression expr(
       t->language == "python"
@@ -1823,6 +2021,279 @@ void Window::closeEvent(QCloseEvent *event) {
   settings.setValue("recent", recent);
   settings.setValue("theme", themeChoice->currentText());
   event->accept();
+}
+void Window::trimTrailingWhitespace(EditorTab *t) {
+  if (!t)
+    return;
+  auto *ed = t->focused;
+  ed->send(SCI_BEGINUNDOACTION);
+  for (int line = int(ed->send(SCI_GETLINECOUNT)) - 1; line >= 0; --line) {
+    auto start = ed->send(SCI_POSITIONFROMLINE, line),
+         end = ed->send(SCI_GETLINEENDPOSITION, line), trim = end;
+    while (trim > start) {
+      int c = ed->send(SCI_GETCHARAT, trim - 1);
+      if (c != ' ' && c != '\t')
+        break;
+      --trim;
+    }
+    if (trim < end) {
+      ed->send(SCI_SETTARGETSTART, trim);
+      ed->send(SCI_SETTARGETEND, end);
+      ed->sends(SCI_REPLACETARGET, 0, "");
+    }
+  }
+  ed->send(SCI_ENDUNDOACTION);
+}
+void Window::ensureFinalNewline(EditorTab *t) {
+  if (!t)
+    return;
+  auto *ed = t->focused;
+  auto length = ed->send(SCI_GETLENGTH);
+  if (!length)
+    return;
+  int last = ed->send(SCI_GETCHARAT, length - 1);
+  if (last == '\n' || last == '\r')
+    return;
+  int mode = ed->send(SCI_GETEOLMODE);
+  ed->send(SCI_APPENDTEXT, mode == SC_EOL_CRLF ? 2 : 1,
+           reinterpret_cast<sptr_t>(mode == SC_EOL_CRLF ? "\r\n"
+                                    : mode == SC_EOL_CR ? "\r"
+                                                        : "\n"));
+}
+// Whole lines touched by the selection; a selection that ends at the start of a
+// line does not include that line. With no selection, `whole` picks the
+// document and otherwise only the caret's line.
+static QPair<int, int> selectedLines(ScintillaEditBase *e, bool whole = false) {
+  auto a = e->send(SCI_GETSELECTIONSTART), b = e->send(SCI_GETSELECTIONEND);
+  if (a == b && whole)
+    return {0, int(e->send(SCI_GETLINECOUNT)) - 1};
+  int first = e->send(SCI_LINEFROMPOSITION, a),
+      last = e->send(SCI_LINEFROMPOSITION, b);
+  if (b > a && e->send(SCI_POSITIONFROMLINE, last) == b)
+    --last;
+  return {first, qMax(first, last)};
+}
+// Comment syntax per language: a line comment, or an open/close pair.
+static QPair<QString, QString> commentSyntax(const QString &language) {
+  static const QHash<QString, QPair<QString, QString>> table = [] {
+    QHash<QString, QPair<QString, QString>> m;
+    auto add = [&m](const QString &open, const QString &close,
+                    const QStringList &names) {
+      for (const auto &n : names)
+        m[n] = {open, close};
+    };
+    add("//", {}, {"actionscript", "c", "cpp", "cs", "d", "go", "java",
+                   "javascript", "javascript.js", "json5", "jsp", "objc",
+                   "php", "rust", "swift", "typescript", "verilog", "escript",
+                   "oscript"});
+    add("#", {}, {"bash", "cmake", "coffeescript", "makefile", "nim",
+                  "nncrontab", "perl", "powershell", "python", "gdscript", "r",
+                  "raku", "ruby", "tcl", "toml", "yaml", "props", "avs"});
+    add(";", {}, {"asm", "ini", "lisp", "scheme", "inno", "nsis", "autoit",
+                  "kix", "rebol", "hollywood", "csound", "purebasic"});
+    add("--", {}, {"ada", "haskell", "mssql", "sql", "vhdl", "asn1"});
+    add("'", {}, {"vb", "freebasic", "blitzbasic", "asp"});
+    add("%", {}, {"latex", "tex", "matlab", "erlang", "postscript",
+                  "txt2tags", "visualprolog"});
+    add("REM ", {}, {"batch"});
+    add("!", {}, {"fortran", "fortran77"});
+    add("<!--", "-->", {"html", "xml"});
+    add("/*", "*/", {"css"});
+    add("(*", "*)", {"pascal", "caml"});
+    return m;
+  }();
+  return table.value(language);
+}
+bool Window::toggleComment() {
+  auto *t = current();
+  if (!t)
+    return false;
+  const auto syntax = commentSyntax(t->language);
+  if (syntax.first.isEmpty()) {
+    statusBar()->showMessage("No comment syntax known for this language", 3000);
+    return false;
+  }
+  auto *e = t->focused;
+  const QByteArray open = syntax.first.toUtf8(), close = syntax.second.toUtf8();
+  const auto range = selectedLines(e);
+  auto lineText = [e](int line) {
+    auto start = e->send(SCI_POSITIONFROMLINE, line),
+         end = e->send(SCI_GETLINEENDPOSITION, line);
+    QByteArray b(int(end - start) + 1, '\0');
+    Sci_TextRangeFull r{{start, end}, b.data()};
+    e->send(SCI_GETTEXTRANGEFULL, 0, reinterpret_cast<sptr_t>(&r));
+    b.chop(1);
+    return b;
+  };
+  bool allCommented = true, anyText = false;
+  int indent = INT_MAX;
+  for (int line = range.first; line <= range.second; ++line) {
+    const QByteArray text = lineText(line).trimmed();
+    if (text.isEmpty())
+      continue;
+    anyText = true;
+    indent = qMin(indent, int(e->send(SCI_GETLINEINDENTATION, line)));
+    if (!text.startsWith(open) || (!close.isEmpty() && !text.endsWith(close)))
+      allCommented = false;
+  }
+  if (!anyText)
+    return false;
+  e->send(SCI_BEGINUNDOACTION);
+  for (int line = range.first; line <= range.second; ++line) {
+    if (lineText(line).trimmed().isEmpty())
+      continue;
+    auto at = e->send(SCI_GETLINEINDENTPOSITION, line),
+         end = e->send(SCI_GETLINEENDPOSITION, line);
+    if (allCommented) {
+      // Remove the closing marker first so the opening position stays valid.
+      if (!close.isEmpty()) {
+        auto stop = end;
+        while (stop > at && (e->send(SCI_GETCHARAT, stop - 1) == ' ' ||
+                             e->send(SCI_GETCHARAT, stop - 1) == '\t'))
+          --stop;
+        auto from = stop - close.size();
+        if (from > at && e->send(SCI_GETCHARAT, from - 1) == ' ')
+          --from;
+        e->send(SCI_SETTARGETRANGE, from, stop);
+        e->sends(SCI_REPLACETARGET, 0, "");
+      }
+      auto len = open.size();
+      if (e->send(SCI_GETCHARAT, at + len) == ' ')
+        ++len;
+      e->send(SCI_SETTARGETRANGE, at, at + len);
+      e->sends(SCI_REPLACETARGET, 0, "");
+    } else {
+      const auto column = e->send(SCI_FINDCOLUMN, line, indent);
+      if (!close.isEmpty())
+        e->sends(SCI_INSERTTEXT, end, (" " + close).constData());
+      e->sends(SCI_INSERTTEXT, column, (open + " ").constData());
+    }
+  }
+  // Keep the lines selected so the command can be repeated to undo itself.
+  if (range.first != range.second)
+    e->send(SCI_SETSEL, e->send(SCI_POSITIONFROMLINE, range.first),
+            e->send(SCI_GETLINEENDPOSITION, range.second));
+  e->send(SCI_ENDUNDOACTION);
+  return true;
+}
+// Replaces whole lines [first, last] with `lines`, keeping the document's
+// line-ending style and a trailing line break only if there was one.
+static void replaceLines(ScintillaEditBase *e, int first, int last,
+                         const QList<QByteArray> &lines) {
+  const int mode = e->send(SCI_GETEOLMODE);
+  const QByteArray eol = mode == SC_EOL_CRLF ? "\r\n" : mode == SC_EOL_CR ? "\r" : "\n";
+  auto start = e->send(SCI_POSITIONFROMLINE, first),
+       end = e->send(SCI_GETLINEENDPOSITION, last);
+  e->send(SCI_SETTARGETRANGE, start, end);
+  QByteArray joined;
+  for (int i = 0; i < lines.size(); ++i)
+    joined += (i ? eol : QByteArray()) + lines[i];
+  e->send(SCI_REPLACETARGET, joined.size(),
+          reinterpret_cast<sptr_t>(joined.constData()));
+}
+static QList<QByteArray> readLines(ScintillaEditBase *e, int first, int last) {
+  QList<QByteArray> lines;
+  for (int line = first; line <= last; ++line) {
+    auto start = e->send(SCI_POSITIONFROMLINE, line),
+         end = e->send(SCI_GETLINEENDPOSITION, line);
+    QByteArray b(int(end - start) + 1, '\0');
+    Sci_TextRangeFull r{{start, end}, b.data()};
+    e->send(SCI_GETTEXTRANGEFULL, 0, reinterpret_cast<sptr_t>(&r));
+    b.chop(1);
+    lines << b;
+  }
+  return lines;
+}
+int Window::sortLines(SortOrder order) {
+  auto *t = current();
+  if (!t)
+    return 0;
+  auto *e = t->focused;
+  const auto range = selectedLines(e, true);
+  auto lines = readLines(e, range.first, range.second);
+  // A final empty line is the document's trailing newline, not content.
+  const bool trailing = range.second == e->send(SCI_GETLINECOUNT) - 1 &&
+                        !lines.isEmpty() && lines.last().isEmpty() &&
+                        lines.size() > 1;
+  if (trailing)
+    lines.removeLast();
+  std::stable_sort(lines.begin(), lines.end(),
+                   [order](const QByteArray &a, const QByteArray &b) {
+                     if (order == IgnoreCase) {
+                       const int c = QString::fromUtf8(a).compare(
+                           QString::fromUtf8(b), Qt::CaseInsensitive);
+                       return c < 0;
+                     }
+                     return order == Ascending ? a < b : b < a;
+                   });
+  if (trailing)
+    lines << QByteArray();
+  e->send(SCI_BEGINUNDOACTION);
+  replaceLines(e, range.first, range.second, lines);
+  e->send(SCI_ENDUNDOACTION);
+  return lines.size() - trailing;
+}
+int Window::removeDuplicateLines() {
+  auto *t = current();
+  if (!t)
+    return 0;
+  auto *e = t->focused;
+  const auto range = selectedLines(e, true);
+  auto lines = readLines(e, range.first, range.second);
+  const bool trailing = range.second == e->send(SCI_GETLINECOUNT) - 1 &&
+                        lines.size() > 1 && lines.last().isEmpty();
+  if (trailing)
+    lines.removeLast();
+  QSet<QByteArray> seen;
+  QList<QByteArray> kept;
+  for (const auto &line : lines)
+    if (!seen.contains(line)) {
+      seen.insert(line);
+      kept << line;
+    }
+  const int removed = lines.size() - kept.size();
+  if (removed) {
+    if (trailing)
+      kept << QByteArray();
+    e->send(SCI_BEGINUNDOACTION);
+    replaceLines(e, range.first, range.second, kept);
+    e->send(SCI_ENDUNDOACTION);
+  }
+  statusBar()->showMessage(QString("Removed %1 duplicate lines").arg(removed),
+                           3000);
+  return removed;
+}
+void Window::joinLines() {
+  auto *t = current();
+  if (!t)
+    return;
+  auto *e = t->focused;
+  auto range = selectedLines(e);
+  // A lone caret joins its line with the next one.
+  if (range.first == range.second &&
+      range.second < e->send(SCI_GETLINECOUNT) - 1)
+    ++range.second;
+  if (range.first == range.second)
+    return;
+  e->send(SCI_SETTARGETRANGE, e->send(SCI_POSITIONFROMLINE, range.first),
+          e->send(SCI_GETLINEENDPOSITION, range.second));
+  e->send(SCI_LINESJOIN);
+}
+bool Window::openSpec(const QString &spec) {
+  if (QFileInfo::exists(spec))
+    return openFile(spec);
+  static const QRegularExpression suffix(R"(^(.+?):(\d+)(?::(\d+))?$)");
+  const auto m = suffix.match(spec);
+  if (!m.hasMatch() || !QFileInfo::exists(m.captured(1)))
+    return openFile(spec);
+  if (!openFile(m.captured(1)))
+    return false;
+  auto *e = current()->focused;
+  const int line = qMax(1, m.captured(2).toInt()) - 1;
+  const int column = qMax(1, m.captured(3).isEmpty() ? 1 : m.captured(3).toInt()) - 1;
+  e->send(SCI_GOTOPOS, e->send(SCI_FINDCOLUMN, line, column));
+  e->send(SCI_SCROLLCARET);
+  return true;
 }
 void Window::dragEnterEvent(QDragEnterEvent *e) {
   if (e->mimeData()->hasUrls())

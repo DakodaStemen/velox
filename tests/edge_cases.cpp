@@ -3,6 +3,7 @@
 #include "ILexer.h"
 #include "Lexilla.h"
 #include "SciLexer.h"
+#include "udleditor.h"
 #include "window.h"
 #include <QtTest>
 #include <sys/stat.h>
@@ -570,7 +571,8 @@ private slots:
                            "Open folder…", "Save as…", "Save session…",
                            "Load session…", "Go to line…", "Fullscreen",
                            "Open configuration folder", "About Velox",
-                           "Save", "Save all", "Close tab"};
+                           "Save", "Save all", "Close tab", "Preferences…",
+                           "Define custom language…"};
     for (auto *a : w.findChildren<QAction *>())
       if (!a->text().isEmpty() && !skip.contains(QString(a->text()).remove('&')) &&
           !a->menu())
@@ -587,6 +589,214 @@ private slots:
     QVERIFY(trigger(w, "Playback"));
     QVERIFY(trigger(w, "Playback"));
     QCOMPARE(t->text(), QByteArray("ab\nab\nab\n"));
+  }
+  // ---- UTF-32, large files and encodings in search -----------------------
+  void utf32RoundTripsAndRejectsTruncation() {
+    QTemporaryDir dir;
+    const QString text = QString::fromUtf8("a\n🌍");
+    for (bool le : {true, false}) {
+      QByteArray raw = QByteArray::fromHex(le ? "fffe0000" : "0000feff");
+      for (char32_t c : {U'a', U'\n', U'\U0001F30D'}) {
+        for (int i = 0; i < 4; ++i)
+          raw += char(le ? (c >> (8 * i)) & 0xff : (c >> (8 * (3 - i))) & 0xff);
+      }
+      QString p = dir.filePath(le ? "le" : "be");
+      put(p, raw);
+      DocumentData d;
+      QString error;
+      QVERIFY2(DocumentData::read(p, d, error), qPrintable(error));
+      QCOMPARE(d.encoding, QString(le ? "UTF-32LE" : "UTF-32BE"));
+      QCOMPARE(QString::fromUtf8(d.utf8), text);
+      QVERIFY2(d.write(d.utf8, p, error), qPrintable(error));
+      QCOMPARE(get(p), raw);
+      put(p, raw.chopped(1));
+      QVERIFY(!DocumentData::read(p, d, error));
+    }
+  }
+  void largeFilesOpenWithoutHighlighting() {
+    QTemporaryDir dir;
+    QString p = dir.filePath("big.cpp");
+    QFile f(p);
+    QVERIFY(f.open(QIODevice::WriteOnly));
+    const QByteArray row("int x = 1; // filler\n");
+    const QByteArray block = row.repeated(64 * 1024);
+    while (f.size() <= largeFileSize)
+      QCOMPARE(f.write(block), qint64(block.size()));
+    f.close();
+    Window w(true);
+    QVERIFY(w.openFile(p));
+    auto *t = w.current();
+    QVERIFY(t->large);
+    QCOMPARE(t->language, QString("normal"));
+    QCOMPARE(at(t, SCI_GETMARGINWIDTHN, 2), sptr_t(0));
+    w.applyLanguage(t, "cpp");
+    QCOMPARE(t->language, QString("normal"));
+    w.prefs.wrap = true;
+    w.applyPreferences(t);
+    QCOMPARE(at(t, SCI_GETWRAPMODE), sptr_t(SC_WRAP_NONE));
+  }
+  void findInFilesHonoursChosenEncoding() {
+    QTemporaryDir dir;
+    put(dir.filePath("latin.txt"), QByteArray("caf\xe9 au lait\n"));
+    Window w(true);
+    w.query->setText("lait");
+    QCOMPARE(w.findInFiles(dir.path(), "*"), 0);
+    w.filesEncoding->setCurrentText("Windows-1252");
+    QCOMPARE(w.findInFiles(dir.path(), "*"), 1);
+    auto *file = w.results->topLevelItem(0);
+    QVERIFY(file);
+    w.openResult(file->child(0));
+    QCOMPARE(QString::fromUtf8(w.current()->text()),
+             QString::fromUtf8("café au lait\n"));
+  }
+  // ---- editing commands ---------------------------------------------------
+  void toggleCommentRoundTrips() {
+    Window w(true);
+    auto *t = w.newDocument("int a;\n  int b;\n\nint c;\n");
+    w.applyLanguage(t, "cpp");
+    at(t, SCI_SELECTALL);
+    QVERIFY(w.toggleComment());
+    QCOMPARE(t->text(), QByteArray("// int a;\n//   int b;\n\n// int c;\n"));
+    QVERIFY(w.toggleComment());
+    QCOMPARE(t->text(), QByteArray("int a;\n  int b;\n\nint c;\n"));
+    // A caret comments only its own line, even when other lines are commented.
+    w.applyLanguage(t, "python");
+    at(t, SCI_GOTOPOS, 0);
+    QVERIFY(w.toggleComment());
+    QCOMPARE(t->text(), QByteArray("# int a;\n  int b;\n\nint c;\n"));
+    w.applyLanguage(t, "html");
+    at(t, SCI_SETTEXT, 0, reinterpret_cast<sptr_t>("<p>x</p>"));
+    QVERIFY(w.toggleComment());
+    QCOMPARE(t->text(), QByteArray("<!-- <p>x</p> -->"));
+    QVERIFY(w.toggleComment());
+    QCOMPARE(t->text(), QByteArray("<p>x</p>"));
+    w.applyLanguage(t, "json");
+    QVERIFY(!w.toggleComment());
+  }
+  void sortAndDeduplicateLines() {
+    Window w(true);
+    auto *t = w.newDocument("b\nB\na\nA\n");
+    w.sortLines(Window::Ascending);
+    QCOMPARE(t->text(), QByteArray("A\nB\na\nb\n"));
+    w.sortLines(Window::Descending);
+    QCOMPARE(t->text(), QByteArray("b\na\nB\nA\n"));
+    w.sortLines(Window::IgnoreCase);
+    QCOMPARE(t->text(), QByteArray("a\nA\nb\nB\n"));
+    auto *d = w.newDocument("a\nb\na\nc\nb\n");
+    QCOMPARE(w.removeDuplicateLines(), 2);
+    QCOMPARE(d->text(), QByteArray("a\nb\nc\n"));
+    auto *crlf = w.newDocument("z\r\ny\r\n");
+    at(crlf, SCI_SETEOLMODE, SC_EOL_CRLF);
+    w.sortLines(Window::Ascending);
+    QCOMPARE(crlf->text(), QByteArray("y\r\nz\r\n"));
+  }
+  void joinLinesAndOpenAtPosition() {
+    QTemporaryDir dir;
+    QString p = dir.filePath("five.txt");
+    put(p, "12345\nabcde\nfghij\n");
+    Window w(true);
+    QVERIFY(w.openSpec(p + ":2:3"));
+    QCOMPARE(at(w.current(), SCI_GETCURRENTPOS), sptr_t(8));
+    QVERIFY(w.openSpec(p + ":99"));   // past the end clamps to the last line
+    QVERIFY(w.current()->data.path == p);
+    at(w.current(), SCI_GOTOPOS, 0);
+    w.joinLines();
+    QCOMPARE(w.current()->text(), QByteArray("12345 abcde\nfghij\n"));
+    QVERIFY(!w.openSpec(dir.filePath("nope.txt:3")));
+  }
+  // ---- preferences --------------------------------------------------------
+  void preferencesApplyAndPersist() {
+    QTemporaryDir dir;
+    QSettings store(dir.filePath("s.ini"), QSettings::IniFormat);
+    Preferences p;
+    p.fontSize = 17;
+    p.tabWidth = 2;
+    p.spaces = false;
+    p.trimOnSave = true;
+    p.store(store);
+    Preferences q;
+    q.load(store);
+    QCOMPARE(q.fontSize, 17);
+    QCOMPARE(q.tabWidth, 2);
+    QVERIFY(!q.spaces);
+    QVERIFY(q.trimOnSave);
+    QVERIFY(!q.finalNewline);
+    Window w(true);
+    w.prefs = q;
+    w.prefs.lineNumbers = false;
+    w.prefs.finalNewline = true;
+    auto *t = w.newDocument();
+    w.applyPreferences(t);
+    w.applyTheme(t);
+    QCOMPARE(at(t, SCI_GETTABWIDTH), sptr_t(2));
+    QCOMPARE(at(t, SCI_GETUSETABS), sptr_t(1));
+    QCOMPARE(at(t, SCI_GETMARGINWIDTHN, 0), sptr_t(0));
+    QCOMPARE(at(t, SCI_STYLEGETSIZE, STYLE_DEFAULT), sptr_t(17));
+    QString f = dir.filePath("trim.txt");
+    put(f, "x  \ny\t");
+    QVERIFY(w.openFile(f));
+    w.prefs = q;
+    w.prefs.finalNewline = true;
+    QVERIFY(w.save(w.current()));
+    QCOMPARE(get(f), QByteArray("x\ny\n"));
+  }
+  // ---- custom language editor ---------------------------------------------
+  void customLanguageRoundTripsAndHighlights() {
+    Window w(true);
+    UdlSpec s;
+    s.name = "Todo List";
+    s.extensions = ".TODO, todo";
+    s.lineComment = "#";
+    s.blockOpen = "/*";
+    s.blockClose = "*/";
+    s.singleQuotes = true;
+    s.keywords[0] = "TODO  FIXME";
+    s.keywordBold[0] = true;
+    s.operators = "+ -";
+    QVERIFY(s.validate(w.languages).isEmpty());
+    QCOMPARE(s.normalizedExtensions(), QString("todo"));
+    QCOMPARE(s.fileName(), QString("todo-list.xml"));
+    QString error;
+    QVERIFY2(s.save(error), qPrintable(error));
+    QMap<QString, QString> saved = UdlSpec::saved();
+    QVERIFY(saved.contains("Todo List"));
+    QDomDocument d;
+    QFile f(saved["Todo List"]);
+    QVERIFY(f.open(QIODevice::ReadOnly));
+    QVERIFY(d.setContent(&f));
+    UdlSpec back;
+    QVERIFY(UdlSpec::fromElement(d.elementsByTagName("UserLang").at(0).toElement(), back));
+    QCOMPARE(back.name, s.name);
+    QCOMPARE(back.lineComment, QString("#"));
+    QCOMPARE(back.blockClose, QString("*/"));
+    QVERIFY(back.singleQuotes && back.doubleQuotes);
+    QVERIFY(back.keywordBold[0] && !back.keywordBold[1]);
+    QCOMPARE(back.keywords[0].simplified(), QString("TODO FIXME"));
+    w.reloadLanguages();
+    QVERIFY(w.languages.contains("Todo List"));
+    QVERIFY(w.languageChoice->findText("Todo List") >= 0);
+    auto *t = w.newDocument("TODO fix # note\n");
+    w.applyLanguage(t, "Todo List");
+    QCOMPARE(t->language, QString("Todo List"));
+    // "TODO" must be styled as keyword 1, the comment as a line comment.
+    QCOMPARE(at(t, SCI_GETSTYLEAT, 0), sptr_t(SCE_USER_STYLE_KEYWORD1));
+    QCOMPARE(at(t, SCI_GETSTYLEAT, 10), sptr_t(SCE_USER_STYLE_COMMENTLINE));
+    // Rejected: clashes with a built-in name, bad markers, half a block comment.
+    UdlSpec bad = s;
+    bad.name = "python";
+    QVERIFY(!bad.validate(w.languages).isEmpty());
+    bad = s;
+    bad.lineComment = "# #";
+    QVERIFY(!bad.validate(w.languages, "Todo List").isEmpty());
+    bad = s;
+    bad.blockClose.clear();
+    QVERIFY(!bad.validate(w.languages, "Todo List").isEmpty());
+    QVERIFY(s.validate(w.languages, "Todo List").isEmpty()); // may keep its own name
+    // Deleting the file and reloading turns open tabs back into plain text.
+    QVERIFY(QFile::remove(saved["Todo List"]));
+    w.reloadLanguages();
+    QVERIFY(!w.languages.contains("Todo List"));
+    QCOMPARE(t->language, QString("normal"));
   }
   void splitViewSurvivesTabClose() {
     Window w(true);

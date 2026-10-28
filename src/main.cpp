@@ -86,7 +86,8 @@ int main(int argc, char **argv) {
   parser.addOption({"new-instance",
                     "Open a separate window instead of reusing a running one"});
   parser.addOption({"screenshot", "Write a window preview and exit", "path"});
-  parser.addPositionalArgument("files", "Files to open", "[files…]");
+  parser.addPositionalArgument("files", "Files to open; FILE:LINE[:COLUMN] jumps to a position",
+                               "[files…]");
   parser.process(app);
 #ifdef VELOX_SELFTEST
   if (parser.isSet("self-test")) {
@@ -139,7 +140,7 @@ int main(int argc, char **argv) {
   if (!parser.isSet("fresh") && !shot)
     window.restore();
   for (const auto &path : files)
-    window.openFile(path);
+    window.openSpec(path);
   if (!window.current())
     window.newDocument();
   if (server.isListening()) {
@@ -159,7 +160,7 @@ int main(int argc, char **argv) {
               accept ? parseForwardedFiles(*data, &ok) : QStringList();
           if (ok) {
             for (const auto &f : files)
-              window.openFile(f);
+              window.openSpec(f);
             window.setWindowState(window.windowState() &
                                   ~Qt::WindowMinimized);
             window.raise();
