@@ -6,7 +6,8 @@ static QByteArray hash(const QByteArray &b) {
   return QCryptographicHash::hash(b, QCryptographicHash::Sha256);
 }
 bool DocumentData::read(const QString &name, DocumentData &out, QString &error,
-                        const QString &fallback, ReadError *kind) {
+                        const QString &fallback, ReadError *kind,
+                        bool computeHash) {
   if (kind)
     *kind = ReadError::Other;
   // Checked before opening: opening a FIFO blocks, and devices never end.
@@ -31,7 +32,8 @@ bool DocumentData::read(const QString &name, DocumentData &out, QString &error,
   DocumentData result;
   result.path = QFileInfo(name).absoluteFilePath();
   result.exists = true;
-  result.diskHash = hash(raw);
+  if (computeHash) // search-only reads skip the SHA-256 pass
+    result.diskHash = hash(raw);
   if (raw.startsWith(QByteArray::fromHex("fffe0000")) ||
       raw.startsWith(QByteArray::fromHex("0000feff"))) {
     error = "UTF-32 files are not supported yet. Convert a copy to UTF-8 "
@@ -53,21 +55,44 @@ bool DocumentData::read(const QString &name, DocumentData &out, QString &error,
     error = "Unknown encoding: " + result.encoding;
     return false;
   }
+  // Decode in chunks so only one chunk of UTF-16 text is alive at a time.
+  // For UTF-8 the validated raw bytes are reused directly as the result.
+  const bool isUtf8 = codec->mibEnum() == 106;
   QTextCodec::ConverterState state(QTextCodec::IgnoreHeader);
-  QByteArray body = raw.mid(result.bom.size());
-  QString text = codec->toUnicode(body.constData(), body.size(), &state);
-  if (state.invalidChars || state.remainingChars) {
+  const char *body = raw.constData() + result.bom.size();
+  const qint64 bodySize = raw.size() - result.bom.size();
+  const qint64 chunk = 1 << 20;
+  if (!isUtf8)
+    result.utf8.reserve(int(qMin<qint64>(bodySize * 2, (1 << 30))));
+  for (qint64 at = 0; at < bodySize; at += chunk) {
+    const int n = int(qMin<qint64>(chunk, bodySize - at));
+    const QString part = codec->toUnicode(body + at, n, &state);
+    if (state.invalidChars) {
+      error = "This file is not valid " + result.encoding +
+              ". Choose a legacy encoding to open it without replacing bytes.";
+      return false;
+    }
+    if (part.contains(QChar(0))) {
+      error = "This appears to be a binary file (contains NUL characters).";
+      return false;
+    }
+    if (!isUtf8)
+      result.utf8 += part.toUtf8();
+  }
+  if (state.remainingChars) {
     error = "This file is not valid " + result.encoding +
             ". Choose a legacy encoding to open it without replacing bytes.";
     if (kind)
       *kind = ReadError::InvalidEncoding;
     return false;
   }
-  if (text.contains(QChar(0))) {
-    error = "This appears to be a binary file (contains NUL characters).";
-    return false;
+  if (isUtf8) {
+    raw.remove(0, result.bom.size());
+    result.utf8 = std::move(raw);
+  } else {
+    raw.clear();
+    raw.squeeze();
   }
-  result.utf8 = text.toUtf8();
   result.stamp();
   out = result;
   if (kind)
@@ -156,14 +181,14 @@ void DocumentData::stamp() {
   diskTime = info.lastModified();
   diskSize = info.size();
 }
-QJsonObject DocumentData::json(const QByteArray &text, bool dirty) const {
+QJsonObject DocumentData::json(bool dirty, const QByteArray &text) const {
   QJsonObject o{{"path", path},
                 {"encoding", encoding},
                 {"bom", QString::fromLatin1(bom.toHex())},
                 {"hash", QString::fromLatin1(diskHash.toHex())},
                 {"exists", exists},
                 {"dirty", dirty}};
-  if (dirty || path.isEmpty())
+  if (needsBackup(dirty))
     o["backup"] = QString::fromLatin1(qCompress(text).toBase64());
   return o;
 }

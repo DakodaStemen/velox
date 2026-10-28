@@ -321,7 +321,135 @@ private slots:
     QVERIFY2(timer.elapsed() < 10000, qPrintable(QString::number(timer.elapsed())));
   }
 
+  void findInFilesCancelAndReentrancy() {
+    QTemporaryDir dir;
+    for (int i = 0; i < 300; ++i)
+      put(dir.filePath(QString("f%1.txt").arg(i)), "needle\n");
+    Window w(true);
+    w.query->setText("needle");
+    QVERIFY(w.findFilesButton->isEnabled());
+    QVERIFY(!w.stopButton->isEnabled());
+    // Stop is a no-op while idle.
+    w.stopSearch();
+    QVERIFY(!w.cancelSearch);
+    // Cancel from inside the event loop once the search is running.
+    QTimer::singleShot(0, &w, [&w] {
+      QVERIFY(w.searching);
+      QVERIFY(!w.findFilesButton->isEnabled());
+      QVERIFY(w.stopButton->isEnabled());
+      w.stopSearch();
+    });
+    int hits = w.findInFiles(dir.path(), "*.txt");
+    QVERIFY(hits < 300);
+    QVERIFY(!w.searching);
+    QVERIFY(w.findFilesButton->isEnabled());
+    QVERIFY(!w.stopButton->isEnabled());
+    // A fresh search runs to completion after a cancelled one.
+    QCOMPARE(w.findInFiles(dir.path(), "*.txt"), 300);
+    // Re-entrant calls are refused.
+    w.searching = true;
+    QCOMPARE(w.findInFiles(dir.path(), "*.txt"), 0);
+    w.searching = false;
+  }
+  void searchOnlyReadSkipsHash() {
+    QTemporaryDir dir;
+    QString p = dir.filePath("a.txt");
+    put(p, "h\xc3\xa9llo");
+    DocumentData full, quick;
+    QString error;
+    QVERIFY(DocumentData::read(p, full, error));
+    QVERIFY(DocumentData::read(p, quick, error, {}, nullptr, false));
+    QVERIFY(!full.diskHash.isEmpty());
+    QVERIFY(quick.diskHash.isEmpty());
+    QCOMPARE(quick.utf8, full.utf8);
+  }
+  void largeAndChunkedDecodingMatches() {
+    QTemporaryDir dir;
+    // Multi-byte characters straddle the 1 MiB decode chunk boundary.
+    QString unit = QString::fromUtf8("a\xc3\xa9\xe2\x82\xac\xf0\x9f\x8c\x8d\n");
+    QString text;
+    while (text.toUtf8().size() < 3 * 1024 * 1024 + 7)
+      text += unit.repeated(4096);
+    QString p8 = dir.filePath("u8.txt"), p16 = dir.filePath("u16.txt");
+    put(p8, text.toUtf8());
+    QByteArray u16 = QByteArray::fromHex("fffe");
+    u16 += QByteArray(reinterpret_cast<const char *>(text.utf16()),
+                      int(text.size() * 2));
+    put(p16, u16);
+    DocumentData a, b;
+    QString error;
+    QVERIFY2(DocumentData::read(p8, a, error), qPrintable(error));
+    QVERIFY2(DocumentData::read(p16, b, error), qPrintable(error));
+    QCOMPARE(a.utf8, text.toUtf8());
+    QCOMPARE(b.utf8, text.toUtf8());
+  }
+
+  // ---- outline ---------------------------------------------------------------
+  void outlineSkippedWhileHiddenAndRebuiltOnShow() {
+    Window w(true);
+    auto *t = w.newDocument("def alpha():\n    pass\nclass Beta:\n    pass\n");
+    w.applyLanguage(t, "python");
+    w.show();
+    QVERIFY(w.outlineDock->isHidden());
+    int before = w.outlineBuilds;
+    w.rebuildOutline();
+    w.rebuildOutline();
+    QCOMPARE(w.outlineBuilds, before); // hidden: no work
+    w.outlineDock->show(); // visibilityChanged -> rebuild
+    QTest::qWait(50);
+    QVERIFY(w.outlineBuilds > before);
+    QStringList names;
+    for (int i = 0; i < w.outline->count(); ++i)
+      names << w.outline->item(i)->text();
+    QCOMPARE(names, QStringList({"alpha", "Beta"}));
+  }
+  void outlineIsBoundedOnHugeDocuments() {
+    Window w(true);
+    QByteArray text;
+    for (int i = 0; i < 60000; ++i)
+      text += "def f" + QByteArray::number(i) + "():\n";
+    auto *t = w.newDocument(text);
+    w.applyLanguage(t, "python");
+    w.show();
+    w.outlineDock->show();
+    QTest::qWait(50);
+    w.rebuildOutline();
+    QVERIFY(w.outline->count() <= 50001);
+    QVERIFY(w.outline->count() >= 50000);
+  }
+
   // ---- sessions and recovery ----------------------------------------------
+  void sessionSkipsUnchangedWritesAndStaysCompatible() {
+    QTemporaryDir dir;
+    QString path = dir.filePath("recovery.json");
+    QString file = dir.filePath("clean.txt");
+    put(file, "clean\n");
+    Window w(false);
+    w.sessionPath = path;
+    QVERIFY(w.openFile(file));
+    auto *dirty = w.newDocument("unsaved\n");
+    Q_UNUSED(dirty);
+    w.snapshot();
+    QCOMPARE(w.sessionWrites, 1);
+    w.snapshot();
+    QCOMPARE(w.sessionWrites, 1); // unchanged: nothing written
+    auto doc = QJsonDocument::fromJson(get(path)).object();
+    QCOMPARE(doc["version"].toInt(), 1);
+    int backups = 0;
+    for (const auto &v : doc["documents"].toArray()) {
+      auto o = v.toObject();
+      QVERIFY(o.contains("path") && o.contains("hash") && o.contains("dirty"));
+      backups += o.contains("backup");
+    }
+    QCOMPARE(backups, 1); // only the untitled tab carries text
+    dirty->primary->send(SCI_APPENDTEXT, 1, reinterpret_cast<sptr_t>("x"));
+    w.snapshot();
+    QCOMPARE(w.sessionWrites, 2);
+    Window restored(true);
+    restored.sessionPath = path;
+    restored.restore();
+    QVERIFY(restored.tabs->count() >= 2);
+  }
   void corruptOrForeignSessionFiles() {
     QTemporaryDir dir;
     for (const auto &raw :
