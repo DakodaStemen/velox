@@ -5,7 +5,8 @@ how to submit them.
 
 ## Getting started
 
-Requirements: Qt 5.15 (`qt5-base`, `qt5-svg`), a C++17 compiler and `make`.
+Requirements: Qt 5.15 (`qt5-base`, `qt5-svg`) or Qt 6 (`qt6-base`, `qt6-svg`; build with `QT=6`), a C++17
+compiler and `make`.
 
 ```sh
 ./build.sh

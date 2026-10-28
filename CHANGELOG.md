@@ -37,6 +37,25 @@ All notable changes to this project are documented in this file. Versions follow
 ### Added
 - Find in files has a Stop button (and Escape), cannot be started twice, disables its button while running, skips files that take too long, and no longer hashes files it only searches.
 
+### Added
+- Preferences dialog (Edit → Preferences) for font, tab width, spaces or tabs, line numbers,
+  current-line highlight, wrapping, whitespace display, auto-indent, completion, and trimming
+  trailing whitespace or adding a final newline on save.
+- UTF-32 (LE/BE) files can be opened and saved.
+- Files up to 1 GiB open. Above 32 MiB, highlighting, folding, wrapping and the outline are off.
+- Find in files can read legacy-encoded files by choosing an encoding, and reports how many files
+  it skipped. More legacy encodings are offered for "Open with encoding".
+- Edit commands: toggle comment (Ctrl+/) for 74 languages, sort lines, remove duplicate lines,
+  join lines, and move line up or down.
+- Language → Define custom language: a dialog for keywords, comments, strings, operators and colors
+  that writes a UDL file to the configuration folder; definitions made there can be edited or deleted.
+- `velox FILE:LINE[:COLUMN]` opens a file at a position.
+- Qt 6 build support (`QT=6 ./build.sh`), a sanitizer build (`SANITIZE=1 ./build.sh`), CI jobs for
+  both, and a Flatpak manifest.
+
+### Changed
+- The crash-recovery snapshot no longer copies the text of unmodified saved files.
+
 ## [0.1.0] - 2026-10-28
 
 First public release.
