@@ -30,7 +30,9 @@ public:
 };
 class Window : public QMainWindow {
 public:
-  explicit Window(bool testing = false);
+  // `shared` is the primary instance: it owns recovery.json and adopts the
+  // recovery files of crashed --new-instance windows.
+  explicit Window(bool testing = false, bool shared = true);
   EditorTab *current() const;
   EditorTab *newDocument(const QByteArray &text = {});
   bool openFile(const QString &path, const QString &fallback = {});
@@ -47,6 +49,9 @@ public:
   void checkDisk();
   void snapshot();
   void restore();
+  QStringList adoptOrphans(const QString &directory);
+  static bool pidAlive(qint64 pid);
+  static qint64 recoveryPid(const QString &fileName); // 0 when not ours
   void refresh();
   QTabWidget *tabs;
   QLineEdit *query, *replacement, *folder, *filters;
@@ -54,6 +59,8 @@ public:
   QComboBox *languageChoice, *encodingChoice, *eolChoice, *themeChoice;
   QMap<QString, Language> languages;
   QString sessionPath;
+  bool shared = true;
+  QStringList *deferredReports = nullptr; // collects report() text
   bool testing;
   bool recording = false;
   bool suppressMacro = false; // editor-internal moves must not be recorded
@@ -81,7 +88,7 @@ private:
   void bookmark(bool next = false, bool previous = false);
   void rebuildOutline();
   void playMacro();
-  void restoreSession(const QString &path);
+  bool restoreSession(const QString &path);
   void saveSession(const QString &path);
   bool canClose(EditorTab *tab);
   void report(const QString &message);
