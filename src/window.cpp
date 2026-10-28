@@ -1414,11 +1414,15 @@ void Window::refresh() {
   auto pos = e->send(SCI_GETCURRENTPOS);
   int line = e->send(SCI_LINEFROMPOSITION, pos),
       col = e->send(SCI_GETCOLUMN, pos);
-  status->setText(QString("  Ln %1, Col %2   |   %3 bytes   |   %4 lines   %5")
+  // Surface files the user cannot save to, so a failed save is no surprise.
+  const bool readOnly = !t->data.path.isEmpty() &&
+                        !QFileInfo(t->data.path).isWritable();
+  status->setText(QString("  Ln %1, Col %2   |   %3 bytes   |   %4 lines   %5%6")
                       .arg(line + 1)
                       .arg(col + 1)
                       .arg(e->send(SCI_GETLENGTH))
                       .arg(e->send(SCI_GETLINECOUNT))
+                      .arg(readOnly ? "  |   Read-only file" : "")
                       .arg(recording ? "● REC" : ""));
   QSignalBlocker b1(languageChoice), b2(encodingChoice), b3(eolChoice);
   languageChoice->setCurrentText(t->language);
