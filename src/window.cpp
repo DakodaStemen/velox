@@ -2,6 +2,7 @@
 // Copyright (C) 2026 The Velox Authors
 // Portions adapted from GPL-3.0-or-later code; see THIRD_PARTY_NOTICES.md.
 #include "window.h"
+#include "palette.h"
 #include "udleditor.h"
 #include "ILexer.h"
 #include "Lexilla.h"
@@ -485,6 +486,7 @@ QAction *Window::action(QMenu *m, const QString &name, const QKeySequence &key,
   a->setShortcut(key);
   a->setCheckable(check);
   connect(a, &QAction::triggered, this, fn);
+  menuActions.append({a, m->title()});
   return a;
 }
 void Window::buildMenus() {
@@ -685,7 +687,10 @@ void Window::buildMenus() {
       },
       true);
   Q_UNUSED(rec);
-  action(m, "Playback", QKeySequence("Ctrl+Shift+P"), [this] { playMacro(); });
+  action(m, "Playback", QKeySequence("Ctrl+Alt+P"), [this] { playMacro(); });
+  action(e, "Command palette…", QKeySequence("Ctrl+Shift+P"),
+         [this] { showCommandPalette(); });
+  action(f, "Quick open…", QKeySequence("Ctrl+P"), [this] { showQuickOpen(); });
   auto *h = menuBar()->addMenu("&Help");
   action(h, "Open configuration folder", {}, [] {
     QDir().mkpath(configPath("userDefineLangs"));
@@ -993,7 +998,71 @@ void Window::chooseFolder() {
   if (path.isEmpty())
     return;
   files->setRootIndex(filesModel->setRootPath(path));
+  workspaceRoot = path;
   filesDock->show();
+}
+QString Window::quickOpenRoot() const {
+  if (!workspaceRoot.isEmpty())
+    return workspaceRoot;
+  if (auto *t = current(); t && !t->data.path.isEmpty())
+    return QFileInfo(t->data.path).absolutePath();
+  return QDir::currentPath();
+}
+void Window::showCommandPalette() {
+  auto *dialog = new PaletteDialog("Type a command…", this);
+  QList<PaletteItem> items;
+  for (const auto &[a, menu] : menuActions) {
+    QString title = a->text();
+    title.remove('&');
+    if (title.isEmpty() || a->menu())
+      continue;
+    QString detail = menu;
+    detail.remove('&');
+    if (!a->shortcut().isEmpty())
+      detail += "  [" + a->shortcut().toString(QKeySequence::NativeText) + "]";
+    items.append({title, detail, QVariant::fromValue(static_cast<void *>(a)),
+                  a->isEnabled()});
+  }
+  dialog->setItems(items);
+  connect(dialog, &PaletteDialog::chosen, this, [](const QVariant &v) {
+    // Run after the popup has closed so focus is back in the editor.
+    auto *a = static_cast<QAction *>(v.value<void *>());
+    QTimer::singleShot(0, a, [a] { a->trigger(); });
+  });
+  dialog->show();
+  dialog->input()->setFocus();
+}
+void Window::showQuickOpen() {
+  const QString root = quickOpenRoot();
+  auto *dialog = new PaletteDialog("Open file in " + root + "…", this);
+  QList<PaletteItem> items;
+  QSet<QString> seen;
+  auto fresh = [&seen](const QString &p) {
+    if (seen.contains(p))
+      return false;
+    seen.insert(p);
+    return true;
+  };
+  for (int i = 0; i < tabs->count(); ++i) { // open tabs first
+    auto *t = static_cast<EditorTab *>(tabs->widget(i));
+    if (t->data.path.isEmpty() || !fresh(t->data.path))
+      continue;
+    items.append({QFileInfo(t->data.path).fileName(), "open tab: " + t->data.path,
+                  t->data.path});
+  }
+  for (const QString &p : recent)
+    if (fresh(p))
+      items.append({QFileInfo(p).fileName(), "recent: " + p, p});
+  for (const QString &rel : listProjectFiles(root)) {
+    const QString abs = QDir(root).absoluteFilePath(rel);
+    if (fresh(abs))
+      items.append({rel, {}, abs});
+  }
+  dialog->setItems(items);
+  connect(dialog, &PaletteDialog::chosen, this,
+          [this](const QVariant &v) { openFile(v.toString()); });
+  dialog->show();
+  dialog->input()->setFocus();
 }
 bool Window::save(EditorTab *t, bool saveAs) {
   if (!t)

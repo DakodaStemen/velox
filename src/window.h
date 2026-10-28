@@ -69,6 +69,11 @@ public:
   int sortLines(SortOrder order);
   int removeDuplicateLines();
   void joinLines();
+  void showCommandPalette();
+  void showQuickOpen();
+  QList<QPair<QAction *, QString>> menuActions; // every menu QAction + menu path
+  QString workspaceRoot;                         // folder chosen with Open folder
+  QString quickOpenRoot() const;
   bool find(bool backwards = false);
   int replaceAll();
   int markAll();
