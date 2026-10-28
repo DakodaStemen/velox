@@ -61,6 +61,8 @@ jobs:
           appstreamcli validate --no-net packaging/io.github.DakodaStemen.Velox.metainfo.xml
 
       - name: Production build has no test suite
+        env:
+          QT: ${{ matrix.qt }}
         run: |
           rm -rf build vendor/lexilla/bin/*.a
           SELFTEST=0 JOBS=$(nproc) ./build.sh
