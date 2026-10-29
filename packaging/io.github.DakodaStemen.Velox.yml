@@ -1,7 +1,8 @@
 # Flatpak manifest. Build from the repository root:
 #   flatpak-builder --user --install --force-clean build-flatpak packaging/io.github.DakodaStemen.Velox.yml
 # Needs flatpak-builder and the org.kde.Sdk//6.9 runtime; bump runtime-version
-# to the newest KDE runtime when releasing. Not yet built or tested.
+# to the newest KDE runtime when releasing. Not yet built here (the KDE runtime is not installed on the dev host);
+# the manifest parses with `flatpak-builder --show-manifest`.
 app-id: io.github.DakodaStemen.Velox
 runtime: org.kde.Platform
 runtime-version: '6.9'
@@ -21,7 +22,7 @@ modules:
   - name: velox
     buildsystem: simple
     build-commands:
-      - QT=6 PREFIX=/app JOBS=${FLATPAK_BUILDER_N_JOBS} ./build.sh
+      - QT=6 SELFTEST=0 PREFIX=/app JOBS=${FLATPAK_BUILDER_N_JOBS} ./build.sh
       - make -C build/app INSTALL_ROOT= install
     sources:
       - type: dir

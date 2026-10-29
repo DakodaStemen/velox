@@ -49,3 +49,54 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" "velox-${GITHUB_REF_NAME#v}.tar.gz" --title "Velox ${GITHUB_REF_NAME#v}" --notes-file notes.md --verify-tag
+
+  appimage:
+    # Attaches an AppImage to the release created above. Built on Ubuntu 24.04 (Qt 6) so the
+    # bundle's glibc floor is that of the oldest supported runner, not of a rolling distro.
+    needs: release
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      # linuxdeploy tools are AppImages themselves; run them without FUSE.
+      APPIMAGE_EXTRACT_AND_RUN: 1
+      QMAKE: /usr/lib/qt6/bin/qmake6
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential qt6-base-dev \
+            qt6-svg-dev libqt6core5compat6-dev libqt6svg6 qt6-qpa-plugins qt6-wayland \
+            libgl1-mesa-dev libxkbcommon-x11-0 libxcb-cursor0 desktop-file-utils file wget
+
+      - name: Build and install into an AppDir
+        run: |
+          QT=6 SELFTEST=0 PREFIX=/usr JOBS=$(nproc) ./build.sh
+          make -C build/app INSTALL_ROOT="$PWD/AppDir" install
+
+      - name: Fetch linuxdeploy and its Qt plugin
+        run: |
+          base=https://github.com/linuxdeploy
+          wget -q "$base/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"
+          wget -q "$base/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage"
+          chmod +x linuxdeploy-*.AppImage
+
+      - name: Create the AppImage
+        env:
+          VERSION: ${{ github.ref_name }}
+          LINUXDEPLOY_OUTPUT_VERSION: ${{ github.ref_name }}
+          DEPLOY_PLATFORM_THEMES: 1
+          EXTRA_PLATFORM_PLUGINS: libqwayland-generic.so
+        run: |
+          ./linuxdeploy-x86_64.AppImage --appdir AppDir --plugin qt \
+            --desktop-file AppDir/usr/share/applications/io.github.DakodaStemen.Velox.desktop \
+            --icon-file AppDir/usr/share/icons/hicolor/scalable/apps/io.github.DakodaStemen.Velox.svg \
+            --output appimage
+          sha256sum Velox-*.AppImage > SHA256SUMS-appimage.txt
+
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" Velox-*.AppImage SHA256SUMS-appimage.txt --clobber

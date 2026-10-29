@@ -11,15 +11,10 @@ SOURCES += src/main.cpp src/document.cpp src/window.cpp src/udleditor.cpp src/pa
 # Build options (pass to qmake as CONFIG+=...; build.sh sets selftest by default):
 #   selftest  - compile the test suite in and enable `velox --self-test`
 #   sanitizer - AddressSanitizer + UndefinedBehaviorSanitizer
-#   demo      - compile the README animation script in (`velox --demo DIR`; DEMO=1 ./build.sh)
 selftest {
     QT += testlib
     DEFINES += VELOX_SELFTEST
     SOURCES += tests/integration.cpp tests/edge_cases.cpp
-}
-demo {
-    DEFINES += VELOX_DEMO
-    SOURCES += tests/demo.cpp
 }
 sanitizer {
     QMAKE_CXXFLAGS += -fsanitize=address,undefined -fno-omit-frame-pointer
