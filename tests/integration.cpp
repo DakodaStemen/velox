@@ -75,7 +75,7 @@ private slots:
   void preservesSymlinkAndPermissions() {
 #ifdef Q_OS_WIN
     QSKIP("needs POSIX symlinks, FIFOs or permission bits");
-#endif
+#else
     QTemporaryDir dir;
     QString target = dir.filePath("target"), link = dir.filePath("link"),
             hard = dir.filePath("hard");
@@ -94,6 +94,7 @@ private slots:
     QVERIFY(::chmod(QFile::encodeName(target), 0444) == 0);
     QVERIFY(!d.write("readonly", link, error));
     QCOMPARE(get(target), QByteArray("after"));
+#endif
   }
   void syntaxAndSharedSplit() {
     Window w(true);

@@ -65,7 +65,7 @@ private slots:
   void rejectsMalformedAndBinaryInput() {
 #ifdef Q_OS_WIN
     QSKIP("needs POSIX symlinks, FIFOs or permission bits");
-#endif
+#else
     QTemporaryDir dir;
     QString p = dir.filePath("bad");
     DocumentData d;
@@ -89,6 +89,7 @@ private slots:
     QVERIFY(!DocumentData::read(fifo, d, error)); // must not block
     QVERIFY(!DocumentData::read("/dev/zero", d, error)); // must not exhaust memory
     QVERIFY(!DocumentData::read("/dev/null", d, error));
+#endif
   }
   void unicodePathsAndLongLines() {
     QTemporaryDir dir;
@@ -120,7 +121,7 @@ private slots:
   void failedSavesNeverDamageTheOriginal() {
 #ifdef Q_OS_WIN
     QSKIP("needs POSIX symlinks, FIFOs or permission bits");
-#endif
+#else
     QTemporaryDir dir;
     QString sub = dir.filePath("locked"), p = sub + "/file.txt";
     QVERIFY(QDir().mkpath(sub));
@@ -149,6 +150,7 @@ private slots:
     QString error;
     QVERIFY(!d.write("x", link, error));
     QVERIFY(!d.write("x", dir.path(), error));
+#endif
   }
   void openRejectsDirectoriesMissingAndHugeFiles() {
     QTemporaryDir dir;
@@ -166,7 +168,7 @@ private slots:
   void sameFileThroughSymlinkOpensOnce() {
 #ifdef Q_OS_WIN
     QSKIP("needs POSIX symlinks, FIFOs or permission bits");
-#endif
+#else
     QTemporaryDir dir;
     QString real = dir.filePath("real.txt"), link = dir.filePath("link.txt");
     put(real, "x");
@@ -176,6 +178,7 @@ private slots:
     QVERIFY(w.openFile(link));
     QVERIFY(w.openFile(dir.path() + "/./real.txt"));
     QCOMPARE(w.tabs->count(), 1);
+#endif
   }
 
   // ---- search and replace --------------------------------------------------
@@ -301,7 +304,7 @@ private slots:
   void findInFilesEdgeCases() {
 #ifdef Q_OS_WIN
     QSKIP("needs POSIX symlinks, FIFOs or permission bits");
-#endif
+#else
     QTemporaryDir dir;
     Window w(true);
     w.query->setText("needle");
@@ -332,6 +335,7 @@ private slots:
     QByteArray sel(at(t, SCI_GETSELTEXT, 0, 0) + 1, '\0');
     t->primary->send(SCI_GETSELTEXT, 0, reinterpret_cast<sptr_t>(sel.data()));
     QCOMPARE(QByteArray(sel.constData()), QByteArray("needle"));
+#endif
   }
   void findInFilesHandlesManyFiles() {
     QTemporaryDir dir;
