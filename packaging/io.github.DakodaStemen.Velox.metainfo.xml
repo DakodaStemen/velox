@@ -14,8 +14,25 @@
     replace, find in files, macros, bookmarks, encoding-aware saving and crash recovery.</p>
     <p>Themes and user-defined languages are plain XML files you can add yourself.</p>
   </description>
+  <branding>
+    <color type="primary" scheme_preference="light">#9cc2ff</color>
+    <color type="primary" scheme_preference="dark">#1f3a66</color>
+  </branding>
+  <keywords>
+    <keyword>editor</keyword>
+    <keyword>text</keyword>
+    <keyword>code</keyword>
+    <keyword>syntax</keyword>
+  </keywords>
   <launchable type="desktop-id">io.github.DakodaStemen.Velox.desktop</launchable>
   <provides><binary>velox</binary></provides>
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </supports>
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
   <url type="homepage">https://github.com/DakodaStemen/velox</url>
   <url type="bugtracker">https://github.com/DakodaStemen/velox/issues</url>
   <url type="vcs-browser">https://github.com/DakodaStemen/velox</url>
@@ -26,7 +43,9 @@
       <image>https://raw.githubusercontent.com/DakodaStemen/velox/main/docs/screenshot.png</image>
     </screenshot>
   </screenshots>
-  <content_rating type="oars-1.1"/>
+  <content_rating type="oars-1.1">
+    <!-- A local text editor: no violence, drugs, sex, language, online interaction or purchases. -->
+  </content_rating>
   <releases>
     <release version="0.1.0" date="2026-10-28"/>
   </releases>
