@@ -90,6 +90,35 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: ./run.sh --self-test
 
+  # Builds the .deb against distro Qt 6, then installs it into a clean
+  # ubuntu:24.04 container to prove the declared dependencies are sufficient.
+  deb-install:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential cmake ninja-build \
+            qt6-base-dev qt6-svg-dev libqt6core5compat6-dev libgl1-mesa-dev dpkg-dev
+
+      - name: Build .deb
+        run: |
+          cmake -S . -B build-deb -G Ninja -DCMAKE_BUILD_TYPE=Release -DVELOX_SELFTEST=ON
+          cmake --build build-deb --parallel
+          cd build-deb && cpack -G DEB && dpkg -I velox*.deb
+
+      - name: Install in clean ubuntu:24.04 and self-test
+        run: |
+          docker run --rm -v "$PWD/build-deb:/pkg:ro" -e QT_QPA_PLATFORM=offscreen ubuntu:24.04 bash -euxc '
+            apt-get update
+            # --no-install-recommends: only the declared Depends may pull in Qt.
+            # libqt6test6 is needed only because this build includes the test suite.
+            apt-get install -y --no-install-recommends /pkg/velox*.deb libqt6test6
+            ldd /usr/bin/velox | tee /dev/stderr | { ! grep "not found"; }
+            velox --self-test'
+
   # Cross-platform CMake build + test + package on the three desktop OSes.
   cmake:
     name: CMake (${{ matrix.os }}, Qt ${{ matrix.qt }})

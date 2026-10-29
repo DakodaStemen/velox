@@ -32,14 +32,20 @@ elseif(APPLE)
 else()
   set(CPACK_GENERATOR "DEB;RPM;TGZ")
   set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
-  set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+  # Dependencies are declared explicitly (not via shlibdeps/autoreq): CI links
+  # against an aqt-installed Qt, whose sonames/paths don't match distro packages.
+  # Runtime Qt modules: Core Gui Widgets Xml Network Core5Compat + Svg (icon/image plugins).
+  set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS OFF)
   set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
   set(CPACK_DEBIAN_PACKAGE_SECTION "editors")
-  set(CPACK_DEBIAN_PACKAGE_DEPENDS "shared-mime-info")
+  set(CPACK_DEBIAN_PACKAGE_DEPENDS
+      "libc6, libstdc++6, libqt6core6t64 | libqt6core6, libqt6gui6, libqt6widgets6, libqt6xml6t64 | libqt6xml6, libqt6network6t64 | libqt6network6, libqt6core5compat6, libqt6svg6, shared-mime-info")
   set(CPACK_RPM_FILE_NAME RPM-DEFAULT)
   set(CPACK_RPM_PACKAGE_LICENSE "GPL-3.0-or-later")
   set(CPACK_RPM_PACKAGE_GROUP "Applications/Editors")
-  set(CPACK_RPM_PACKAGE_AUTOREQ ON)
+  set(CPACK_RPM_PACKAGE_AUTOREQ OFF)
+  set(CPACK_RPM_PACKAGE_REQUIRES
+      "qt6-qtbase, qt6-qtbase-gui, qt6-qtsvg, qt6-qt5compat, shared-mime-info")
   set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
       /usr/share/applications /usr/share/icons /usr/share/icons/hicolor
       /usr/share/icons/hicolor/scalable /usr/share/icons/hicolor/scalable/apps
