@@ -153,6 +153,16 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: ctest --test-dir build-cmake --output-on-failure
 
+      - name: Self-test log (Windows, runs only if ctest failed)
+        if: failure() && runner.os == 'Windows'
+        shell: bash
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QT_FORCE_STDERR_LOGGING: 1
+        run: |
+          ./build-cmake/velox.exe --self-test > selftest.log 2>&1; code=$?
+          echo "exit code: $code"; cat selftest.log
+
       - name: Validate desktop metadata
         if: runner.os == 'Linux'
         run: |
