@@ -1,0 +1,54 @@
+# CPack configuration, included from the top-level CMakeLists.txt.
+#   Windows : NSIS installer (+ ZIP)       cpack -G NSIS | WIX (MSI, needs WiX Toolset)
+#   macOS   : DragNDrop .dmg (+ ZIP)
+#   Linux   : DEB, RPM, TGZ                AppImage: packaging/appimage/build-appimage.sh
+set(CPACK_PACKAGE_NAME "velox")
+set(CPACK_PACKAGE_VENDOR "The Velox Authors")
+set(CPACK_PACKAGE_VERSION ${VELOX_VERSION})
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "A fast, lightweight native text and code editor")
+set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/DakodaStemen/velox")
+set(CPACK_PACKAGE_CONTACT "DakodaStemen <noreply@github.com>")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
+set(CPACK_PACKAGE_FILE_NAME "velox-${VELOX_VERSION}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
+set(CPACK_COMPONENTS_ALL Runtime)
+set(CPACK_STRIP_FILES ON)
+
+if(WIN32)
+  set(CPACK_GENERATOR "NSIS;ZIP")
+  set(CPACK_PACKAGE_INSTALL_DIRECTORY "Velox")
+  set(CPACK_NSIS_DISPLAY_NAME "Velox")
+  set(CPACK_NSIS_PACKAGE_NAME "Velox")
+  set(CPACK_NSIS_MODIFY_PATH OFF)
+  set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
+  set(CPACK_NSIS_URL_INFO_ABOUT "${CPACK_PACKAGE_HOMEPAGE_URL}")
+  set(CPACK_NSIS_EXECUTABLES_DIRECTORY "bin")
+  set(CPACK_PACKAGE_EXECUTABLES "velox" "Velox")
+  # MSI: `cpack -G WIX` (requires the WiX Toolset on PATH). Stable upgrade GUID:
+  set(CPACK_WIX_UPGRADE_GUID "6f1b0a52-9a3e-4c53-9b64-5f8e0c2f7d11")
+  set(CPACK_WIX_PRODUCT_GUID "*")
+elseif(APPLE)
+  set(CPACK_GENERATOR "DragNDrop;ZIP")
+  set(CPACK_DMG_VOLUME_NAME "Velox ${VELOX_VERSION}")
+else()
+  set(CPACK_GENERATOR "DEB;RPM;TGZ")
+  set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
+  # Dependencies are declared explicitly (not via shlibdeps/autoreq): CI links
+  # against an aqt-installed Qt, whose sonames/paths don't match distro packages.
+  # Runtime Qt modules: Core Gui Widgets Xml Network Core5Compat + Svg (icon/image plugins).
+  set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS OFF)
+  set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
+  set(CPACK_DEBIAN_PACKAGE_SECTION "editors")
+  set(CPACK_DEBIAN_PACKAGE_DEPENDS
+      "libc6, libstdc++6, libqt6core6t64 | libqt6core6, libqt6gui6, libqt6widgets6, libqt6xml6t64 | libqt6xml6, libqt6network6t64 | libqt6network6, libqt6core5compat6, libqt6svg6, shared-mime-info")
+  set(CPACK_RPM_FILE_NAME RPM-DEFAULT)
+  set(CPACK_RPM_PACKAGE_LICENSE "GPL-3.0-or-later")
+  set(CPACK_RPM_PACKAGE_GROUP "Applications/Editors")
+  set(CPACK_RPM_PACKAGE_AUTOREQ OFF)
+  set(CPACK_RPM_PACKAGE_REQUIRES
+      "qt6-qtbase, qt6-qtbase-gui, qt6-qtsvg, qt6-qt5compat, shared-mime-info")
+  set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
+      /usr/share/applications /usr/share/icons /usr/share/icons/hicolor
+      /usr/share/icons/hicolor/scalable /usr/share/icons/hicolor/scalable/apps
+      /usr/share/metainfo /usr/share/doc)
+endif()
+include(CPack)

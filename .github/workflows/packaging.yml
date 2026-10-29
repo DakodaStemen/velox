@@ -1,0 +1,60 @@
+name: Packaging (AppImage)
+
+# Manual only: builds an AppImage and uploads it as a workflow artifact.
+# Never creates a Release or tag. (deb/rpm/tgz/exe/dmg/zip come from ci.yml.)
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: ['.github/workflows/packaging.yml', 'packaging/**']
+
+permissions:
+  contents: read
+
+jobs:
+  appimage:
+    runs-on: ubuntu-24.04
+    env:
+      APPIMAGE_EXTRACT_AND_RUN: 1
+      QMAKE: /usr/lib/qt6/bin/qmake6
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential qt6-base-dev \
+            qt6-svg-dev libqt6core5compat6-dev libqt6svg6 qt6-qpa-plugins qt6-wayland \
+            libgl1-mesa-dev libxkbcommon-x11-0 libxcb-cursor0 desktop-file-utils file wget
+
+      - name: Build and install into an AppDir
+        run: |
+          QT=6 SELFTEST=0 PREFIX=/usr JOBS=$(nproc) ./build.sh
+          make -C build/app INSTALL_ROOT="$PWD/AppDir" install
+
+      - name: Fetch linuxdeploy and its Qt plugin
+        run: |
+          base=https://github.com/linuxdeploy
+          wget -q "$base/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"
+          wget -q "$base/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage"
+          chmod +x linuxdeploy-*.AppImage
+
+      - name: Create the AppImage
+        env:
+          VERSION: dev
+          LINUXDEPLOY_OUTPUT_VERSION: dev
+          DEPLOY_PLATFORM_THEMES: 1
+          EXTRA_PLATFORM_PLUGINS: libqwayland-generic.so
+        run: |
+          ./linuxdeploy-x86_64.AppImage --appdir AppDir --plugin qt \
+            --desktop-file AppDir/usr/share/applications/io.github.DakodaStemen.Velox.desktop \
+            --icon-file AppDir/usr/share/icons/hicolor/scalable/apps/io.github.DakodaStemen.Velox.svg \
+            --output appimage
+          sha256sum Velox-*.AppImage > SHA256SUMS-appimage.txt
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: velox-AppImage
+          path: |
+            Velox-*.AppImage
+            SHA256SUMS-appimage.txt
+          if-no-files-found: error

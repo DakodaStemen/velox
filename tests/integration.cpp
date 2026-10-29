@@ -5,8 +5,10 @@
 #include "SciLexer.h"
 #include "window.h"
 #include <QtTest>
+#ifdef Q_OS_UNIX
 #include <sys/stat.h>
 #include <unistd.h>
+#endif
 
 class Integration : public QObject {
   Q_OBJECT
@@ -71,6 +73,9 @@ private slots:
     QVERIFY(!d.write("ours", dir.filePath("missing/file"), error));
   }
   void preservesSymlinkAndPermissions() {
+#ifdef Q_OS_WIN
+    QSKIP("needs POSIX symlinks, FIFOs or permission bits");
+#else
     QTemporaryDir dir;
     QString target = dir.filePath("target"), link = dir.filePath("link"),
             hard = dir.filePath("hard");
@@ -89,6 +94,7 @@ private slots:
     QVERIFY(::chmod(QFile::encodeName(target), 0444) == 0);
     QVERIFY(!d.write("readonly", link, error));
     QCOMPARE(get(target), QByteArray("after"));
+#endif
   }
   void syntaxAndSharedSplit() {
     Window w(true);

@@ -6,29 +6,49 @@
 #include <QtTest>
 #endif
 #include <memory>
+#ifdef Q_OS_UNIX
 #include <unistd.h>
+#endif
 #ifdef VELOX_SELFTEST
 int selfTest(QApplication &app);
 #endif
+// A stable per-user token for the instance name: the numeric uid on POSIX,
+// the account name elsewhere (Windows has no uid).
+static QString userToken() {
+#ifdef Q_OS_UNIX
+  return QString::number(qulonglong(getuid()));
+#else
+  QString name = qEnvironmentVariable("USERNAME");
+  if (name.isEmpty())
+    name = qEnvironmentVariable("USER", "user");
+  name.replace(QRegularExpression("[^A-Za-z0-9_.-]"), "_");
+  return name;
+#endif
+}
 // Prefer the per-user runtime directory (0700, owned by us) over the shared,
-// world-writable /tmp for the socket and lock file.
+// world-writable /tmp for the socket and lock file. Only XDG systems have one.
 static QString runtimeDir() {
+#ifdef Q_OS_UNIX
   const QString dir = qEnvironmentVariable("XDG_RUNTIME_DIR");
   QFileInfo info(dir);
   if (dir.isEmpty() || !QDir::isAbsolutePath(dir) || !info.isDir() ||
       !info.isWritable() || info.ownerId() != getuid())
     return {};
   return QDir::cleanPath(dir);
+#else
+  return {};
+#endif
 }
 static QString instanceName() {
-  const QString name = QString("velox-%1").arg(getuid());
+  const QString name = QString("velox-%1").arg(userToken());
   const QString dir = runtimeDir();
+  // On Windows QLocalSocket is a named pipe, so a bare name is required.
   return dir.isEmpty() ? name : dir + '/' + name + ".sock";
 }
 static QString lockPath() {
   const QString dir = runtimeDir();
   return (dir.isEmpty() ? QDir::tempPath() : dir) +
-         QString("/velox-%1.lock").arg(getuid());
+         QString("/velox-%1.lock").arg(userToken());
 }
 static const qint64 kMaxForwardBytes = 1024 * 1024;
 static const int kForwardTimeoutMs = 5000;

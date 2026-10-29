@@ -89,3 +89,135 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: ./run.sh --self-test
+
+  # Builds the .deb against distro Qt 6, then installs it into a clean
+  # ubuntu:24.04 container to prove the declared dependencies are sufficient.
+  deb-install:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential cmake ninja-build \
+            qt6-base-dev qt6-svg-dev libqt6core5compat6-dev libgl1-mesa-dev dpkg-dev
+
+      - name: Build .deb
+        run: |
+          cmake -S . -B build-deb -G Ninja -DCMAKE_BUILD_TYPE=Release -DVELOX_SELFTEST=ON
+          cmake --build build-deb --parallel
+          cd build-deb && cpack -G DEB && dpkg -I velox*.deb
+
+      - name: Install in clean ubuntu:24.04 and self-test
+        run: |
+          docker run --rm -v "$PWD/build-deb:/pkg:ro" -e QT_QPA_PLATFORM=offscreen ubuntu:24.04 bash -euxc '
+            apt-get update
+            # --no-install-recommends: only the declared Depends may pull in Qt.
+            # libqt6test6 is needed only because this build includes the test suite.
+            apt-get install -y --no-install-recommends /pkg/velox*.deb libqt6test6
+            ldd /usr/bin/velox | tee /dev/stderr | { ! grep "not found"; }
+            velox --self-test'
+
+  # Cross-platform CMake build + test + package on the three desktop OSes.
+  cmake:
+    name: CMake (${{ matrix.os }}, Qt ${{ matrix.qt }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            qt: 6.8.*
+            arch: linux_gcc_64
+          - os: windows-latest
+            qt: 6.8.*
+            arch: win64_msvc2022_64
+          # Qt 6.8.3 links the AGL framework, which newer Xcode SDKs removed.
+          - os: macos-latest
+            qt: 6.9.*
+            arch: clang_64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
+        with:
+          version: ${{ matrix.qt }}
+          arch: ${{ matrix.arch }}
+          modules: qt5compat
+          cache: true
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build rpm libgl1-mesa-dev libxkbcommon-dev libxcb-cursor0 desktop-file-utils appstream
+
+      - name: Install macOS build dependencies
+        if: runner.os == 'macOS'
+        run: brew install ninja
+
+      - name: Install Windows build dependencies
+        if: runner.os == 'Windows'
+        run: choco install ninja nsis --no-progress -y
+
+      - name: Set up MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@a102174a2b586eec2ea151a69e6fd14404a8ce7c # v1.13.0
+
+      - name: Check version consistency
+        shell: bash
+        run: scripts/check-version.sh
+
+      - name: Configure
+        shell: bash
+        run: cmake -S . -B build-cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DVELOX_SELFTEST=ON
+
+      - name: Build
+        run: cmake --build build-cmake --parallel
+
+      - name: Test
+        if: runner.os != 'Windows'
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --test-dir build-cmake --output-on-failure
+
+      # ctest swallows the console output of this exe on Windows runners, so
+      # run it directly and print the log.
+      - name: Test (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QT_FORCE_STDERR_LOGGING: 1
+        run: |
+          code=0; ./build-cmake/velox.exe --self-test > selftest.log 2>&1 || code=$?
+          echo "exit code: $code, log bytes: $(wc -c < selftest.log)"
+          cat selftest.log; exit $code
+
+      - name: Validate desktop metadata
+        if: runner.os == 'Linux'
+        run: |
+          desktop-file-validate packaging/io.github.DakodaStemen.Velox.desktop
+          appstreamcli validate --no-net packaging/io.github.DakodaStemen.Velox.metainfo.xml
+
+      - name: Production configure (no test suite) and package
+        shell: bash
+        run: |
+          cmake -S . -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DVELOX_SELFTEST=OFF
+          cmake --build build-release --parallel
+          cd build-release && cpack
+
+      - name: Upload packages
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: velox-${{ runner.os }}
+          path: |
+            build-release/velox-*.exe
+            build-release/velox-*.zip
+            build-release/velox-*.dmg
+            build-release/velox*.deb
+            build-release/velox-*.rpm
+            build-release/velox-*.tar.gz
+          if-no-files-found: error
