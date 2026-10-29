@@ -796,6 +796,7 @@ private slots:
     QFile f(saved["Todo List"]);
     QVERIFY(f.open(QIODevice::ReadOnly));
     QVERIFY(d.setContent(&f));
+    f.close(); // Windows cannot delete a file that is still open
     UdlSpec back;
     QVERIFY(UdlSpec::fromElement(d.elementsByTagName("UserLang").at(0).toElement(), back));
     QCOMPARE(back.name, s.name);
