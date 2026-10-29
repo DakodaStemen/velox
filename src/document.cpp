@@ -188,7 +188,11 @@ bool DocumentData::write(const QByteArray &text, const QString &name,
       return false;
     }
 #endif
-    if (!target.isWritable()) {
+    // Permission bits, not access(): root can write anything, but a 0444 file
+    // is still one the user marked read-only.
+    if (!(target.permissions() &
+          (QFileDevice::WriteOwner | QFileDevice::WriteGroup |
+           QFileDevice::WriteOther))) {
       error = "The destination is read-only.";
       return false;
     }
