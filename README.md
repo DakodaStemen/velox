@@ -74,7 +74,8 @@ velox [options] [files…]
 | Ctrl+F2, F2 | Toggle bookmark, next bookmark |
 | Ctrl+D | Duplicate line or selection |
 | Ctrl+Alt+S | Split view |
-| Ctrl+Shift+R / Ctrl+Shift+P | Record / play macro (editor actions only; menu commands are not recorded) |
+| Ctrl+Shift+P / Ctrl+P | Command palette / quick open (fuzzy file search in the sidebar folder) |
+| Ctrl+Shift+R / Ctrl+Alt+P | Record / play macro (editor actions only; menu commands are not recorded) |
 | Alt+Z | Toggle word wrap |
 | Ctrl+/ | Toggle comment |
 | Alt+Up / Alt+Down | Move line up / down |

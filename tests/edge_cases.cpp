@@ -3,6 +3,7 @@
 #include "ILexer.h"
 #include "Lexilla.h"
 #include "SciLexer.h"
+#include "palette.h"
 #include "udleditor.h"
 #include "window.h"
 #include <QTextCodec>
@@ -826,6 +827,80 @@ private slots:
                                reinterpret_cast<sptr_t>("typed"));
     QVERIFY(!w.macro.isEmpty()); // real user edits still record
     QVERIFY(trigger(w, "Start / stop recording"));
+  }
+  void fuzzyScoreRanksSubsequences() {
+    QVERIFY(fuzzyScore("sv", "Save") >= 0);
+    QCOMPARE(fuzzyScore("zz", "Save"), -1);
+    QCOMPARE(fuzzyScore("", "anything"), 0);
+    QVERIFY(fuzzyScore("sa", "Save") > fuzzyScore("sa", "Select all"));
+    QVERIFY(fuzzyScore("spl", "Split view") > fuzzyScore("spl", "Save plain text"));
+    QVERIFY(fuzzyScore("SAVE", "save") >= 0); // case-insensitive
+  }
+  void paletteListsEveryMenuActionAndFilters() {
+    Window w(true);
+    QVERIFY(w.menuActions.size() > 40);
+    QStringList names;
+    for (const auto &entry : w.menuActions)
+      names << entry.first->text().remove('&');
+    QVERIFY(names.contains("Command palette…"));
+    QVERIFY(names.contains("Quick open…"));
+    QVERIFY(names.contains("Playback"));
+    QList<PaletteItem> items;
+    for (const auto &entry : w.menuActions)
+      items.append({entry.first->text().remove('&'), entry.second, {}});
+    auto *dialog = new PaletteDialog("x", &w);
+    dialog->setItems(items);
+    dialog->setFilter("playb");
+    QVERIFY(dialog->visibleTitles().contains("Playback"));
+    QCOMPARE(dialog->visibleTitles().first(), QString("Playback"));
+    dialog->setFilter("qqqzzz");
+    QVERIFY2(dialog->visibleTitles().isEmpty(), qPrintable(dialog->visibleTitles().join("|")));
+    delete dialog;
+  }
+  void paletteRunsTheChosenAction() {
+    Window w(true);
+    int fired = 0;
+    auto *a = new QAction("Palette probe", &w);
+    connect(a, &QAction::triggered, &w, [&] { ++fired; });
+    auto *dialog = new PaletteDialog("x", &w);
+    dialog->setItems({{"Palette probe", "test", QVariant::fromValue(static_cast<void *>(a))}});
+    QVariant got;
+    connect(dialog, &PaletteDialog::chosen, &w, [&](const QVariant &v) { got = v; });
+    dialog->setFilter("probe");
+    QVERIFY(dialog->chooseCurrent());
+    static_cast<QAction *>(got.value<void *>())->trigger();
+    QCOMPARE(fired, 1);
+  }
+  void shortcutsDoNotConflict() {
+    Window w(true);
+    QMultiHash<QString, QString> byKey;
+    for (const auto &entry : w.menuActions)
+      if (!entry.first->shortcut().isEmpty())
+        byKey.insert(entry.first->shortcut().toString(), entry.first->text().remove('&'));
+    for (const QString &key : byKey.uniqueKeys())
+      QVERIFY2(byKey.count(key) == 1,
+               qPrintable(key + " is bound to " + byKey.values(key).join(" and ")));
+    for (const auto &entry : w.menuActions)
+      if (entry.first->text().remove('&') == "Playback")
+        QCOMPARE(entry.first->shortcut().toString(), QString("Ctrl+Alt+P"));
+  }
+  void quickOpenListsProjectFilesAndSkipsBuildDirs() {
+    QTemporaryDir dir;
+    QDir d(dir.path());
+    QVERIFY(d.mkpath("src/sub"));
+    QVERIFY(d.mkpath(".git/objects"));
+    QVERIFY(d.mkpath("node_modules/x"));
+    for (const QString &f : {"a.txt", "src/b.cpp", "src/sub/c.h", ".git/objects/z",
+                             "node_modules/x/y.js"}) {
+      QFile file(d.filePath(f));
+      QVERIFY(file.open(QIODevice::WriteOnly));
+    }
+    QCOMPARE(listProjectFiles(dir.path()),
+             (QStringList{"a.txt", "src/b.cpp", "src/sub/c.h"}));
+    QCOMPARE(listProjectFiles(dir.path(), 2).size(), 2);
+    Window w(true);
+    w.workspaceRoot = dir.path();
+    QCOMPARE(w.quickOpenRoot(), dir.path());
   }
   void macroCopiesPointerText() {
     Window w(true);
