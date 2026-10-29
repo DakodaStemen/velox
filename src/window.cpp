@@ -1736,6 +1736,11 @@ int Window::findInFiles(const QString &root, const QString &patterns) {
       filesEncoding->currentIndex() > 0 ? filesEncoding->currentText() : QString();
   while (it.hasNext() && hits < limit) {
     const QString path = it.next();
+    // QDir::Files only hides dot-files on Unix filesystems with the hidden
+    // attribute semantics of the platform (macOS uses a flag, not the name),
+    // so skip dot-directories like .git explicitly everywhere.
+    if (QDir(root).relativeFilePath(path).contains(QRegularExpression("(^|/)\\.")))
+      continue;
     if (++scanned % 64 == 0) {
       statusBar()->showMessage(QString("Searching… %1 files").arg(scanned));
       // User input stays enabled so Stop / Escape can reach us; the

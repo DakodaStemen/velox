@@ -980,7 +980,7 @@ private slots:
     QCOMPARE(Window::recoveryPid("recovery-123.json"), qint64(123));
     QCOMPARE(Window::recoveryPid("recovery.json"), qint64(0));
     QCOMPARE(Window::recoveryPid("recovery-1a.json"), qint64(0));
-    QVERIFY(Window::pidAlive(getpid()));
+    QVERIFY(Window::pidAlive(QCoreApplication::applicationPid()));
     QVERIFY(!Window::pidAlive(999999999));
     {
       Window own(true, false);
@@ -991,7 +991,12 @@ private slots:
     }
     QTemporaryDir dir;
     QString dead = dir.filePath("recovery-999999999.json");
-    QString live = dir.filePath(QString("recovery-%1.json").arg(getppid()));
+#ifdef Q_OS_UNIX
+    const qint64 otherLivePid = getppid();
+#else
+    const qint64 otherLivePid = QCoreApplication::applicationPid();
+#endif
+    QString live = dir.filePath(QString("recovery-%1.json").arg(otherLivePid));
     for (const auto &p : {dead, live}) {
       Window crashed(false, false);
       crashed.sessionPath = p;
