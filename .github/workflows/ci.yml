@@ -104,8 +104,9 @@ jobs:
           - os: windows-latest
             qt: 6.8.*
             arch: win64_msvc2022_64
+          # Qt 6.8.3 links the AGL framework, which newer Xcode SDKs removed.
           - os: macos-latest
-            qt: 6.8.*
+            qt: 6.9.*
             arch: clang_64
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

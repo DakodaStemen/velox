@@ -87,8 +87,8 @@ if(MSVC)
 endif()
 
 # ---- Velox application -----------------------------------------------------
-set(VELOX_SOURCES src/main.cpp src/document.cpp src/window.cpp src/udleditor.cpp
-  src/document.h src/window.h src/udleditor.h)
+set(VELOX_SOURCES src/main.cpp src/document.cpp src/window.cpp src/udleditor.cpp src/palette.cpp
+  src/document.h src/window.h src/udleditor.h src/palette.h)
 set(VELOX_ICONS)
 if(WIN32 AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/velox.rc)
   list(APPEND VELOX_ICONS packaging/windows/velox.rc)
