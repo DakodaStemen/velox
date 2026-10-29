@@ -6,6 +6,7 @@ All notable changes to this project are documented in this file. Versions follow
 ## [Unreleased]
 
 ### Added
+- Command palette (Ctrl+Shift+P) listing every menu action and Quick open (Ctrl+P) for files under the sidebar folder, both with fuzzy matching.
 - README animation (`docs/demo.gif`), rendered from the real window by an opt-in demo script (`CONFIG+=demo` / `DEMO=1 ./build.sh`, `velox --demo DIR`) and the manual `Demo` workflow. Release and default builds do not contain it.
 
 ### Changed
