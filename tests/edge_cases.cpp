@@ -13,6 +13,13 @@
 #include <unistd.h>
 #endif
 
+static bool isRoot() {
+#ifdef Q_OS_UNIX
+  return geteuid() == 0;
+#else
+  return false;
+#endif
+}
 QStringList parseForwardedFiles(const QByteArray &data, bool *ok);
 
 class EdgeCases : public QObject {
@@ -125,7 +132,7 @@ private slots:
     QVERIFY(::chmod(QFile::encodeName(sub), 0555) == 0);
     bool saved = w.save(t);
     ::chmod(QFile::encodeName(sub), 0755);
-    if (geteuid() != 0) { // root ignores directory permissions
+    if (!isRoot()) { // root ignores directory permissions
       QVERIFY(!saved);
       QCOMPARE(get(p), QByteArray("original\n"));
       QVERIFY(t->dirty());
@@ -315,7 +322,7 @@ private slots:
     int hits = w.findInFiles(dir.path(), "*.txt, *.md; *.cpp");
     ::chmod(QFile::encodeName(dir.filePath("locked.txt")), 0644);
     // deep + utf16 (+ locked when running as root); latin1 is skipped.
-    QCOMPARE(hits, geteuid() == 0 ? 3 : 2);
+    QCOMPARE(hits, isRoot() ? 3 : 2);
     // Opening a UTF-16 result selects the right characters.
     for (int i = 0; i < w.results->topLevelItemCount(); ++i)
       if (w.results->topLevelItem(i)->text(0).startsWith("utf16"))
