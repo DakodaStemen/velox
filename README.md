@@ -1,16 +1,4 @@
-<p align="center">
-  <img src="packaging/io.github.DakodaStemen.Velox.svg" width="96" alt="">
-</p>
-
 <h1 align="center">Velox</h1>
-
-```text
- __     __  _____  _       ___  __  __
- \ \   / / | ____|| |     / _ \ \ \/ /
-  \ \ / /  |  _|  | |    | | | | \  /
-   \ V /   | |___ | |___ | |_| | /  \
-    \_/    |_____||_____| \___/ /_/\_\
-```
 
 <p align="center">A fast, lightweight native text and code editor for Linux.</p>
 
