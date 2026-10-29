@@ -188,7 +188,7 @@ jobs:
             build-release/velox-*.exe
             build-release/velox-*.zip
             build-release/velox-*.dmg
-            build-release/velox-*.deb
+            build-release/velox*.deb
             build-release/velox-*.rpm
             build-release/velox-*.tar.gz
           if-no-files-found: error

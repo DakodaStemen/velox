@@ -243,17 +243,7 @@ private slots:
     Window w(true);
     w.regex->setChecked(true);
     w.query->setText("alpha ?(\\d+)");
-    {
-      const int n = w.findInFiles(dir.path(), "*");
-      if (n != 3)
-        for (int i = 0; i < w.results->topLevelItemCount(); ++i) {
-          auto *it = w.results->topLevelItem(i);
-          qWarning() << "DIAG" << it->text(0) << it->childCount();
-          for (int j = 0; j < it->childCount(); ++j)
-            qWarning() << "DIAG  " << it->child(j)->text(0);
-        }
-      QCOMPARE(n, 3);
-    }
+    QCOMPARE(w.findInFiles(dir.path(), "*"), 3);
     QCOMPARE(w.results->topLevelItemCount(), 2);
     QCOMPARE(w.findInFiles(dir.path(), "*.cpp *.h"), 1);
     w.openResult(w.results->topLevelItem(0)->child(0));
