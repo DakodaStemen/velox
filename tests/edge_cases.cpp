@@ -8,8 +8,10 @@
 #include "window.h"
 #include <QTextCodec>
 #include <QtTest>
+#ifdef Q_OS_UNIX
 #include <sys/stat.h>
 #include <unistd.h>
+#endif
 
 QStringList parseForwardedFiles(const QByteArray &data, bool *ok);
 
@@ -54,6 +56,9 @@ private slots:
     }
   }
   void rejectsMalformedAndBinaryInput() {
+#ifdef Q_OS_WIN
+    QSKIP("needs POSIX symlinks, FIFOs or permission bits");
+#endif
     QTemporaryDir dir;
     QString p = dir.filePath("bad");
     DocumentData d;
@@ -106,6 +111,9 @@ private slots:
     QCOMPARE(get(p), QByteArray("a\nb\nc\nd"));
   }
   void failedSavesNeverDamageTheOriginal() {
+#ifdef Q_OS_WIN
+    QSKIP("needs POSIX symlinks, FIFOs or permission bits");
+#endif
     QTemporaryDir dir;
     QString sub = dir.filePath("locked"), p = sub + "/file.txt";
     QVERIFY(QDir().mkpath(sub));
@@ -149,6 +157,9 @@ private slots:
     QCOMPARE(w.tabs->count(), 0);
   }
   void sameFileThroughSymlinkOpensOnce() {
+#ifdef Q_OS_WIN
+    QSKIP("needs POSIX symlinks, FIFOs or permission bits");
+#endif
     QTemporaryDir dir;
     QString real = dir.filePath("real.txt"), link = dir.filePath("link.txt");
     put(real, "x");
@@ -281,6 +292,9 @@ private slots:
     QVERIFY(!shown.contains(QChar::ReplacementCharacter));
   }
   void findInFilesEdgeCases() {
+#ifdef Q_OS_WIN
+    QSKIP("needs POSIX symlinks, FIFOs or permission bits");
+#endif
     QTemporaryDir dir;
     Window w(true);
     w.query->setText("needle");
