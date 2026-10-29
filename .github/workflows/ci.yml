@@ -161,8 +161,10 @@ jobs:
         shell: bash
         env:
           QT_QPA_PLATFORM: offscreen
+          QT_FORCE_STDERR_LOGGING: 1
         run: |
           code=0; ./build-cmake/velox.exe --self-test > selftest.log 2>&1 || code=$?
+          echo "exit code: $code, log bytes: $(wc -c < selftest.log)"
           cat selftest.log; exit $code
 
       - name: Validate desktop metadata
