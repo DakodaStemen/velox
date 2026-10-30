@@ -1759,8 +1759,13 @@ void Window::stopSearch() {
 int Window::findInFiles(const QString &root, const QString &patterns) {
   if (searching) // re-entered from the event loop below
     return 0;
+  // The scan pumps the event loop, so anything may happen in between files:
+  // tabs closing (the scan never touches tabs, so that is harmless), the
+  // window closing (closeEvent cancels the scan) or the window being deleted.
+  // `w` is a QPointer so the scan can notice the last case and bail out
+  // without touching a single member.
   struct Running {
-    Window *w;
+    QPointer<Window> w;
     explicit Running(Window *window) : w(window) {
       w->searching = true;
       w->cancelSearch = false;
@@ -1768,6 +1773,8 @@ int Window::findInFiles(const QString &root, const QString &patterns) {
       w->stopButton->setEnabled(true);
     }
     ~Running() {
+      if (!w)
+        return;
       w->searching = false;
       w->findFilesButton->setEnabled(true);
       w->stopButton->setEnabled(false);
@@ -1807,6 +1814,8 @@ int Window::findInFiles(const QString &root, const QString &patterns) {
       // User input stays enabled so Stop / Escape can reach us; the
       // `searching` guard makes re-entry into findInFiles a no-op.
       QCoreApplication::processEvents();
+      if (!running.w)
+        return 0; // this window was deleted from the event loop
     }
     if (cancelSearch) {
       cancelled = true;
@@ -2159,6 +2168,9 @@ void Window::restore() {
     newDocument();
 }
 void Window::closeEvent(QCloseEvent *event) {
+  // A find-in-files scan pumps the event loop; stop it so a closed window
+  // does not keep scanning (it finishes its current file, then returns).
+  stopSearch();
   if (testing) {
     event->accept();
     return;
