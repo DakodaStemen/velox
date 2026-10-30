@@ -662,6 +662,30 @@ private slots:
     QFile::remove(p);
     QFile::remove(configPath("userDefineLangs/broken.xml"));
   }
+  void oversizedConfigXmlIsSkipped() {
+    QDir().mkpath(configPath("userDefineLangs"));
+    const QString p = configPath("userDefineLangs/huge.xml");
+    // Well-formed and otherwise valid, just padded past the cap.
+    put(p, "<Velox><UserLang name=\"Huge\" ext=\"huge\" veloxEditor=\"1\"/><!-- " +
+               QByteArray(int(maxXmlSize), 'x') + " --></Velox>");
+    QDomDocument d;
+    QTest::ignoreMessage(QtWarningMsg, QRegularExpression("Skipping .*huge\\.xml"));
+    QVERIFY(!loadXml(p, d));
+    QTest::ignoreMessage(QtWarningMsg, QRegularExpression("Skipping .*huge\\.xml"));
+    QVERIFY(!UdlSpec::saved().contains("Huge"));
+    QTest::ignoreMessage(QtWarningMsg, QRegularExpression("Skipping .*huge\\.xml"));
+    Window w(true);
+    QVERIFY(!w.languages.contains("Huge"));
+    // The same language under the cap loads normally.
+    put(p, "<Velox><UserLang name=\"Huge\" ext=\"huge\" veloxEditor=\"1\"/></Velox>");
+    QVERIFY(loadXml(p, d));
+    QVERIFY(UdlSpec::saved().contains("Huge"));
+    QFile::remove(p);
+#ifdef Q_OS_UNIX
+    QTest::ignoreMessage(QtWarningMsg, QRegularExpression("not a regular file"));
+    QVERIFY(!loadXml("/dev/zero", d)); // must not read forever
+#endif
+  }
   void menuActionsOnEmptyAndFullDocuments() {
     Window w(true);
     auto *t = w.newDocument("  a  \n\tb\t\n\n c");

@@ -34,11 +34,31 @@ static QStringList legacyEncodings() {
 static int colour(const QColor &c) {
   return c.red() | (c.green() << 8) | (c.blue() << 16);
 }
-static QDomDocument xml(const QString &path) {
+bool loadXml(const QString &path, QDomDocument &doc) {
+  const QFileInfo info(path);
+  if (info.exists() && (!info.isFile() || info.size() > maxXmlSize)) {
+    qWarning().noquote() << "Skipping" << path
+                         << (info.isFile() ? QString("(over %1 MiB)")
+                                                 .arg(maxXmlSize >> 20)
+                                           : QString("(not a regular file)"));
+    return false;
+  }
   QFile f(path);
+  if (!f.open(QIODevice::ReadOnly) || f.isSequential())
+    return false;
+  // Bounded read: the file may have grown since the size check.
+  const QByteArray bytes = f.read(maxXmlSize + 1);
+  if (bytes.size() > maxXmlSize) {
+    qWarning().noquote() << "Skipping" << path
+                         << QString("(over %1 MiB)").arg(maxXmlSize >> 20);
+    return false;
+  }
+  return bool(doc.setContent(bytes));
+}
+static QDomDocument xml(const QString &path) {
   QDomDocument d;
-  if (f.open(QIODevice::ReadOnly))
-    d.setContent(&f);
+  if (!loadXml(path, d))
+    d.clear();
   return d;
 }
 static constexpr int markIndicator = 31;
