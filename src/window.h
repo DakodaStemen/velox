@@ -13,8 +13,13 @@ struct Language {
 };
 // Files above this size open without highlighting, folding or the outline.
 constexpr qint64 largeFileSize = 32 * 1024 * 1024;
-// Scintilla's text copies here use int lengths, so stay well below 2 GiB.
-constexpr qint64 maxFileSize = 1024LL * 1024 * 1024;
+// maxFileSize (the hard open limit) lives in document.h.
+// Language, theme and UDL XML files above this size are skipped with a warning
+// instead of being parsed (the largest shipped file is under 1 MiB).
+constexpr qint64 maxXmlSize = 4 * 1024 * 1024;
+// Parses `path` into `doc`; false (with a warning for oversized or
+// non-regular files) when it cannot be read or is not well-formed XML.
+bool loadXml(const QString &path, QDomDocument &doc);
 QString dataPath(const QString &file);
 QString configPath(const QString &file = {});
 // User-adjustable options, stored in settings.ini and edited in the
@@ -86,6 +91,7 @@ public:
   QStringList adoptOrphans(const QString &directory);
   static bool pidAlive(qint64 pid);
   static qint64 recoveryPid(const QString &fileName); // 0 when not ours
+  static bool trustedRecoveryFile(const QString &path);
   void refresh();
   void rebuildOutline();
   void stopSearch();

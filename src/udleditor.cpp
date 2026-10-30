@@ -189,9 +189,8 @@ QMap<QString, QString> UdlSpec::saved() {
   QMap<QString, QString> found;
   for (const auto &file : QDir(configPath("userDefineLangs"))
                               .entryInfoList({"*.xml"}, QDir::Files, QDir::Name)) {
-    QFile f(file.filePath());
     QDomDocument d;
-    if (!f.open(QIODevice::ReadOnly) || !d.setContent(&f))
+    if (!loadXml(file.filePath(), d))
       continue;
     auto langs = d.elementsByTagName("UserLang");
     for (int i = 0; i < langs.size(); ++i) {

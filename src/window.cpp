@@ -13,7 +13,9 @@
 #else
 #include <cerrno>
 #include <csignal>
+#include <sys/stat.h>
 #include <sys/types.h>
+#include <unistd.h>
 #endif
 #include "SciLexer.h"
 #include "BoostRegexSearch.h"
@@ -34,14 +36,37 @@ static QStringList legacyEncodings() {
 static int colour(const QColor &c) {
   return c.red() | (c.green() << 8) | (c.blue() << 16);
 }
-static QDomDocument xml(const QString &path) {
+bool loadXml(const QString &path, QDomDocument &doc) {
+  const QFileInfo info(path);
+  if (info.exists() && (!info.isFile() || info.size() > maxXmlSize)) {
+    qWarning().noquote() << "Skipping" << path
+                         << (info.isFile() ? QString("(over %1 MiB)")
+                                                 .arg(maxXmlSize >> 20)
+                                           : QString("(not a regular file)"));
+    return false;
+  }
   QFile f(path);
+  if (!f.open(QIODevice::ReadOnly) || f.isSequential())
+    return false;
+  // Bounded read: the file may have grown since the size check.
+  const QByteArray bytes = f.read(maxXmlSize + 1);
+  if (bytes.size() > maxXmlSize) {
+    qWarning().noquote() << "Skipping" << path
+                         << QString("(over %1 MiB)").arg(maxXmlSize >> 20);
+    return false;
+  }
+  return bool(doc.setContent(bytes));
+}
+static QDomDocument xml(const QString &path) {
   QDomDocument d;
-  if (f.open(QIODevice::ReadOnly))
-    d.setContent(&f);
+  if (!loadXml(path, d))
+    d.clear();
   return d;
 }
 static constexpr int markIndicator = 31;
+// Defined in vendor/boostregex/BoostRegExSearch.cxx: error code of the last
+// failed regex search (boost::regex_constants::error_type, 0 when none).
+int veloxRegexErrorCode();
 // Installed builds keep data in <prefix>/share/velox; development builds run
 // from build/app/bin next to the repository's share directory.
 QString dataPath(const QString &file) {
@@ -248,6 +273,32 @@ bool Window::pidAlive(qint64 pid) {
   return ::kill(pid_t(pid), 0) == 0 || errno == EPERM;
 #endif
 }
+// Recovery files carry unsaved text that is loaded without asking, so on
+// POSIX only regular files owned by this user and not writable by group or
+// others are trusted; anything else may have been planted by another account.
+bool Window::trustedRecoveryFile(const QString &path) {
+#ifdef Q_OS_WIN
+  Q_UNUSED(path);
+  return true; // per-user AppData ACLs already restrict the directory
+#else
+  struct stat st{};
+  if (::lstat(QFile::encodeName(path).constData(), &st) != 0)
+    return false;
+  return S_ISREG(st.st_mode) && st.st_uid == ::geteuid() &&
+         !(st.st_mode & (S_IWGRP | S_IWOTH));
+#endif
+}
+// The recovery directory holds unsaved text: keep it private to this user.
+static void makePrivateDirectory(const QString &dir) {
+  QDir().mkpath(dir);
+#ifndef Q_OS_WIN
+  struct stat st{};
+  const QByteArray native = QFile::encodeName(dir);
+  if (::stat(native.constData(), &st) == 0 && S_ISDIR(st.st_mode) &&
+      st.st_uid == ::geteuid() && (st.st_mode & 0077))
+    ::chmod(native.constData(), 0700);
+#endif
+}
 qint64 Window::recoveryPid(const QString &fileName) {
   static const QRegularExpression expr("^recovery-(\\d+)\\.json$");
   auto m = expr.match(fileName);
@@ -266,7 +317,7 @@ Window::Window(bool test, bool sharedInstance)
       (shared ? QString("/velox/recovery.json")
               : QString("/velox/recovery-%1.json")
                     .arg(QCoreApplication::applicationPid()));
-  QDir().mkpath(QFileInfo(sessionPath).absolutePath());
+  makePrivateDirectory(QFileInfo(sessionPath).absolutePath());
   loadLanguages();
   auto *center = new QWidget;
   auto *layout = new QVBoxLayout(center);
@@ -1649,7 +1700,13 @@ int Window::replaceAll() {
 bool Window::regexFailed(ScintillaEditBase *e) {
   if (e->send(SCI_GETSTATUS) != SC_STATUS_WARN_REGEX)
     return false;
-  statusBar()->showMessage("Invalid regular expression", 4000);
+  // 18 is boost::regex_constants::error_complexity: the matcher hit its state
+  // budget (catastrophic backtracking) rather than rejecting the pattern.
+  statusBar()->showMessage(veloxRegexErrorCode() == 18
+                               ? "Regular expression is too complex for this "
+                                 "text (search stopped)"
+                               : "Invalid regular expression",
+                           6000);
   e->send(SCI_SETSTATUS, SC_STATUS_OK);
   return true;
 }
@@ -1702,8 +1759,13 @@ void Window::stopSearch() {
 int Window::findInFiles(const QString &root, const QString &patterns) {
   if (searching) // re-entered from the event loop below
     return 0;
+  // The scan pumps the event loop, so anything may happen in between files:
+  // tabs closing (the scan never touches tabs, so that is harmless), the
+  // window closing (closeEvent cancels the scan) or the window being deleted.
+  // `w` is a QPointer so the scan can notice the last case and bail out
+  // without touching a single member.
   struct Running {
-    Window *w;
+    QPointer<Window> w;
     explicit Running(Window *window) : w(window) {
       w->searching = true;
       w->cancelSearch = false;
@@ -1711,6 +1773,8 @@ int Window::findInFiles(const QString &root, const QString &patterns) {
       w->stopButton->setEnabled(true);
     }
     ~Running() {
+      if (!w)
+        return;
       w->searching = false;
       w->findFilesButton->setEnabled(true);
       w->stopButton->setEnabled(false);
@@ -1750,6 +1814,8 @@ int Window::findInFiles(const QString &root, const QString &patterns) {
       // User input stays enabled so Stop / Escape can reach us; the
       // `searching` guard makes re-entry into findInFiles a no-op.
       QCoreApplication::processEvents();
+      if (!running.w)
+        return 0; // this window was deleted from the event loop
     }
     if (cancelSearch) {
       cancelled = true;
@@ -1804,7 +1870,11 @@ int Window::findInFiles(const QString &root, const QString &patterns) {
       if (start <= pos)
         break;
     }
+    // An invalid pattern fails on every file, and one that is too complex
+    // for this file has already spent its budget: stop instead of paying it
+    // again for each remaining file.
     if (regexFailed(scanner)) {
+      scanner->send(SCI_CLEARALL);
       results->clear();
       return 0;
     }
@@ -2071,6 +2141,11 @@ QStringList Window::adoptOrphans(const QString &directory) {
     const qint64 pid = recoveryPid(info.fileName());
     if (!pid || pid == self || pidAlive(pid))
       continue;
+    if (!trustedRecoveryFile(info.absoluteFilePath())) {
+      qWarning().noquote() << "Not adopting" << info.absoluteFilePath()
+                           << "(not owned by this user, or writable by others)";
+      continue;
+    }
     if (restoreSession(info.absoluteFilePath()))
       adopted << info.absoluteFilePath();
     else
@@ -2093,6 +2168,9 @@ void Window::restore() {
     newDocument();
 }
 void Window::closeEvent(QCloseEvent *event) {
+  // A find-in-files scan pumps the event loop; stop it so a closed window
+  // does not keep scanning (it finishes its current file, then returns).
+  stopSearch();
   if (testing) {
     event->accept();
     return;

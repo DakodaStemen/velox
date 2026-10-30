@@ -23,7 +23,14 @@ static bool decodeUtf32(const QByteArray &body, bool little, QString &out) {
       return false;
     units << c;
   }
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+  // Qt 6 deprecates the uint* overload; Qt 5 before 5.14 lacks char32_t*.
+  static_assert(sizeof(uint) == sizeof(char32_t), "UCS-4 unit size");
+  out = QString::fromUcs4(reinterpret_cast<const char32_t *>(units.constData()),
+                          units.size());
+#else
   out = QString::fromUcs4(units.constData(), units.size());
+#endif
   return true;
 }
 static QByteArray encodeUtf32(const QString &text, bool little) {
@@ -54,9 +61,35 @@ bool DocumentData::read(const QString &name, DocumentData &out, QString &error,
     error = f.errorString();
     return false;
   }
-  QByteArray raw = f.readAll();
+  // Re-checked on the open handle: the path may have been replaced since the
+  // probe above, and readAll() on a device would never end.
+  if (f.isSequential()) {
+    error = "Only regular files can be opened (this is a device, pipe or "
+            "socket).";
+    return false;
+  }
+  const QString tooLarge =
+      QString("Files over %1 GiB are not supported.").arg(maxFileSize >> 30);
+  if (f.size() > maxFileSize) {
+    error = tooLarge;
+    return false;
+  }
+  // Bounded even if the file grows while it is read: never hold more than
+  // maxFileSize + 1 bytes.
+  QByteArray raw = f.read(f.size() + 1);
+  while (f.error() == QFileDevice::NoError && raw.size() <= maxFileSize) {
+    const QByteArray more =
+        f.read(qMin<qint64>(1 << 20, maxFileSize + 1 - raw.size()));
+    if (more.isEmpty())
+      break;
+    raw += more;
+  }
   if (f.error() != QFileDevice::NoError) {
     error = f.errorString();
+    return false;
+  }
+  if (raw.size() > maxFileSize) {
+    error = tooLarge;
     return false;
   }
   DocumentData result;

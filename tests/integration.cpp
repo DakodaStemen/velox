@@ -298,6 +298,8 @@ private slots:
 int runEdgeCases();
 int selfTest(QApplication &app) {
   Q_UNUSED(app);
+  if (qEnvironmentVariableIsSet("VELOX_TEST_ONLY"))
+    return runEdgeCases(); // targeted run; see runEdgeCases()
   Integration test;
   int argc = 1;
   char name[] = "integration";

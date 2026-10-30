@@ -3,6 +3,9 @@
 #pragma once
 #include <QtCore>
 enum class ReadError { None, Other, InvalidEncoding };
+// Largest file DocumentData::read loads. Scintilla's text copies use int
+// lengths, so stay well below 2 GiB.
+constexpr qint64 maxFileSize = 1024LL * 1024 * 1024;
 struct DocumentData {
   QString path;
   QString encoding = "UTF-8";
