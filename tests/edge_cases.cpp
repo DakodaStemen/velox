@@ -165,6 +165,34 @@ private slots:
     QVERIFY(!w.openFile(huge));
     QCOMPARE(w.tabs->count(), 0);
   }
+  void readRefusesFilesOverTheSizeLimit() {
+    QTemporaryDir dir;
+    const QString huge = dir.filePath("huge.txt");
+    {
+      QFile f(huge);
+      QVERIFY(f.open(QIODevice::WriteOnly));
+      if (!f.resize(maxFileSize + 1)) // sparse on Linux/macOS/NTFS
+        QSKIP("filesystem cannot create a sparse file this large");
+    }
+    DocumentData d;
+    QString error;
+    QElapsedTimer timer;
+    timer.start();
+    QVERIFY(!DocumentData::read(huge, d, error));
+    QVERIFY2(error.contains("not supported"), qPrintable(error));
+    QVERIFY2(timer.elapsed() < 2000, "size must be checked before reading");
+    QVERIFY(d.utf8.isEmpty());
+    // The same file shrunk below the limit passes the size check and is
+    // judged on content instead (all NUL bytes).
+    {
+      QFile f(huge);
+      QVERIFY(f.open(QIODevice::ReadWrite));
+      QVERIFY(f.resize(4096));
+    }
+    error.clear();
+    QVERIFY(!DocumentData::read(huge, d, error));
+    QVERIFY2(error.contains("binary"), qPrintable(error));
+  }
   void sameFileThroughSymlinkOpensOnce() {
 #ifdef Q_OS_WIN
     QSKIP("needs POSIX symlinks, FIFOs or permission bits");

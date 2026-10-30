@@ -54,9 +54,35 @@ bool DocumentData::read(const QString &name, DocumentData &out, QString &error,
     error = f.errorString();
     return false;
   }
-  QByteArray raw = f.readAll();
+  // Re-checked on the open handle: the path may have been replaced since the
+  // probe above, and readAll() on a device would never end.
+  if (f.isSequential()) {
+    error = "Only regular files can be opened (this is a device, pipe or "
+            "socket).";
+    return false;
+  }
+  const QString tooLarge =
+      QString("Files over %1 GiB are not supported.").arg(maxFileSize >> 30);
+  if (f.size() > maxFileSize) {
+    error = tooLarge;
+    return false;
+  }
+  // Bounded even if the file grows while it is read: never hold more than
+  // maxFileSize + 1 bytes.
+  QByteArray raw = f.read(f.size() + 1);
+  while (f.error() == QFileDevice::NoError && raw.size() <= maxFileSize) {
+    const QByteArray more =
+        f.read(qMin<qint64>(1 << 20, maxFileSize + 1 - raw.size()));
+    if (more.isEmpty())
+      break;
+    raw += more;
+  }
   if (f.error() != QFileDevice::NoError) {
     error = f.errorString();
+    return false;
+  }
+  if (raw.size() > maxFileSize) {
+    error = tooLarge;
     return false;
   }
   DocumentData result;

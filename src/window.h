@@ -13,8 +13,7 @@ struct Language {
 };
 // Files above this size open without highlighting, folding or the outline.
 constexpr qint64 largeFileSize = 32 * 1024 * 1024;
-// Scintilla's text copies here use int lengths, so stay well below 2 GiB.
-constexpr qint64 maxFileSize = 1024LL * 1024 * 1024;
+// maxFileSize (the hard open limit) lives in document.h.
 QString dataPath(const QString &file);
 QString configPath(const QString &file = {});
 // User-adjustable options, stored in settings.ini and edited in the
