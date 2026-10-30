@@ -23,7 +23,14 @@ static bool decodeUtf32(const QByteArray &body, bool little, QString &out) {
       return false;
     units << c;
   }
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+  // Qt 6 deprecates the uint* overload; Qt 5 before 5.14 lacks char32_t*.
+  static_assert(sizeof(uint) == sizeof(char32_t), "UCS-4 unit size");
+  out = QString::fromUcs4(reinterpret_cast<const char32_t *>(units.constData()),
+                          units.size());
+#else
   out = QString::fromUcs4(units.constData(), units.size());
+#endif
   return true;
 }
 static QByteArray encodeUtf32(const QString &text, bool little) {
