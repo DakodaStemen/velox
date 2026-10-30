@@ -91,6 +91,7 @@ public:
   QStringList adoptOrphans(const QString &directory);
   static bool pidAlive(qint64 pid);
   static qint64 recoveryPid(const QString &fileName); // 0 when not ours
+  static bool trustedRecoveryFile(const QString &path);
   void refresh();
   void rebuildOutline();
   void stopSearch();

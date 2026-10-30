@@ -1126,6 +1126,42 @@ private slots:
     QVERIFY(!QFile::exists(dead));    // adopted, then removed
     QVERIFY(QFile::exists(live));     // owner still running: left alone
     QVERIFY(QFile::exists(primary.sessionPath)); // re-snapshotted first
+#ifdef Q_OS_UNIX
+    // Recovery files writable by group/others are never adopted or renamed.
+    QString planted = dir.filePath("recovery-999999998.json");
+    {
+      Window crashed(false, false);
+      crashed.sessionPath = planted;
+      crashed.newDocument("planted text");
+      crashed.snapshot();
+    }
+    QVERIFY(Window::trustedRecoveryFile(planted)); // written 0600 by us
+    QVERIFY(::chmod(QFile::encodeName(planted).constData(), 0622) == 0);
+    QVERIFY(!Window::trustedRecoveryFile(planted));
+    QVERIFY(!Window::trustedRecoveryFile(dir.filePath("missing.json")));
+    {
+      Window adopter(true, true);
+      adopter.sessionPath = dir.filePath("recovery.json");
+      QTest::ignoreMessage(QtWarningMsg, QRegularExpression("Not adopting .*999999998"));
+      QCOMPARE(adopter.adoptOrphans(dir.path()), QStringList());
+      QVERIFY(QFile::exists(planted));
+      QVERIFY(!QFile::exists(planted + ".corrupt"));
+    }
+    // The real recovery directory is made private to this user, even when it
+    // already existed with looser permissions.
+    const QString dataDir = QFileInfo(primary.sessionPath).absolutePath();
+    const QString realDir =
+        QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) +
+        "/velox";
+    QVERIFY(dataDir != realDir); // primary was redirected above
+    QVERIFY(::chmod(QFile::encodeName(realDir).constData(), 0755) == 0);
+    { Window fresh(true, true); }
+    QCOMPARE(QFile::permissions(realDir) &
+                 (QFileDevice::ReadGroup | QFileDevice::WriteGroup |
+                  QFileDevice::ExeGroup | QFileDevice::ReadOther |
+                  QFileDevice::WriteOther | QFileDevice::ExeOther),
+             QFileDevice::Permissions());
+#endif
     // A --new-instance window never restores or adopts anything.
     Window other(true, false);
     other.sessionPath = dir.filePath("recovery-4242.json");

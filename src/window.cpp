@@ -13,7 +13,9 @@
 #else
 #include <cerrno>
 #include <csignal>
+#include <sys/stat.h>
 #include <sys/types.h>
+#include <unistd.h>
 #endif
 #include "SciLexer.h"
 #include "BoostRegexSearch.h"
@@ -271,6 +273,32 @@ bool Window::pidAlive(qint64 pid) {
   return ::kill(pid_t(pid), 0) == 0 || errno == EPERM;
 #endif
 }
+// Recovery files carry unsaved text that is loaded without asking, so on
+// POSIX only regular files owned by this user and not writable by group or
+// others are trusted; anything else may have been planted by another account.
+bool Window::trustedRecoveryFile(const QString &path) {
+#ifdef Q_OS_WIN
+  Q_UNUSED(path);
+  return true; // per-user AppData ACLs already restrict the directory
+#else
+  struct stat st{};
+  if (::lstat(QFile::encodeName(path).constData(), &st) != 0)
+    return false;
+  return S_ISREG(st.st_mode) && st.st_uid == ::geteuid() &&
+         !(st.st_mode & (S_IWGRP | S_IWOTH));
+#endif
+}
+// The recovery directory holds unsaved text: keep it private to this user.
+static void makePrivateDirectory(const QString &dir) {
+  QDir().mkpath(dir);
+#ifndef Q_OS_WIN
+  struct stat st{};
+  const QByteArray native = QFile::encodeName(dir);
+  if (::stat(native.constData(), &st) == 0 && S_ISDIR(st.st_mode) &&
+      st.st_uid == ::geteuid() && (st.st_mode & 0077))
+    ::chmod(native.constData(), 0700);
+#endif
+}
 qint64 Window::recoveryPid(const QString &fileName) {
   static const QRegularExpression expr("^recovery-(\\d+)\\.json$");
   auto m = expr.match(fileName);
@@ -289,7 +317,7 @@ Window::Window(bool test, bool sharedInstance)
       (shared ? QString("/velox/recovery.json")
               : QString("/velox/recovery-%1.json")
                     .arg(QCoreApplication::applicationPid()));
-  QDir().mkpath(QFileInfo(sessionPath).absolutePath());
+  makePrivateDirectory(QFileInfo(sessionPath).absolutePath());
   loadLanguages();
   auto *center = new QWidget;
   auto *layout = new QVBoxLayout(center);
@@ -2104,6 +2132,11 @@ QStringList Window::adoptOrphans(const QString &directory) {
     const qint64 pid = recoveryPid(info.fileName());
     if (!pid || pid == self || pidAlive(pid))
       continue;
+    if (!trustedRecoveryFile(info.absoluteFilePath())) {
+      qWarning().noquote() << "Not adopting" << info.absoluteFilePath()
+                           << "(not owned by this user, or writable by others)";
+      continue;
+    }
     if (restoreSession(info.absoluteFilePath()))
       adopted << info.absoluteFilePath();
     else
