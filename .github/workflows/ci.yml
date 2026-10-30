@@ -177,6 +177,10 @@ jobs:
       - name: Build
         run: cmake --build build-cmake --parallel
 
+      - name: Verify Linux binary hardening
+        if: runner.os == 'Linux'
+        run: python3 scripts/check-hardening.py build-cmake/velox
+
       - name: Test
         if: runner.os != 'Windows'
         env:

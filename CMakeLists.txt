@@ -18,6 +18,7 @@ endif()
 
 option(VELOX_SELFTEST "Compile the test suite in and enable `velox --self-test`" ON)
 option(VELOX_SANITIZE "AddressSanitizer + UndefinedBehaviorSanitizer (GCC/Clang)" OFF)
+option(VELOX_HARDENING "Enable compiler and linker security hardening" ON)
 set(VELOX_QT_MAJOR "" CACHE STRING "Force Qt major version (5 or 6); empty = prefer 6")
 
 if(VELOX_QT_MAJOR)
@@ -42,6 +43,41 @@ set(BOOSTRE ${CMAKE_CURRENT_SOURCE_DIR}/vendor/boostregex)
 if(VELOX_SANITIZE AND NOT MSVC)
   add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
   add_link_options(-fsanitize=address,undefined)
+endif()
+
+# Apply hardening before defining targets: the vendored parsers need it too.
+if(VELOX_HARDENING)
+  if(NOT MSVC)
+    include(CheckCXXCompilerFlag)
+    add_compile_options(-fstack-protector-strong)
+    check_cxx_compiler_flag(-fstack-clash-protection VELOX_HAS_STACK_CLASH_PROTECTION)
+    if(VELOX_HAS_STACK_CLASH_PROTECTION)
+      add_compile_options(-fstack-clash-protection)
+    endif()
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$")
+      check_cxx_compiler_flag(-fcf-protection VELOX_HAS_CF_PROTECTION)
+      if(VELOX_HAS_CF_PROTECTION)
+        add_compile_options(-fcf-protection)
+      endif()
+    endif()
+    # Fortify needs optimization. Keep -U before -D, including when a toolchain
+    # already supplies a definition, and leave Debug / sanitizer-only builds alone.
+    add_compile_options(
+      "$<$<CONFIG:Release,RelWithDebInfo,MinSizeRel>:-U_FORTIFY_SOURCE>"
+      "$<$<CONFIG:Release,RelWithDebInfo,MinSizeRel>:-D_FORTIFY_SOURCE=3>")
+    # CMP0083 is NEW via cmake_minimum_required: PIC alone does not link PIE.
+    include(CheckPIESupported)
+    check_pie_supported(LANGUAGES CXX)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+      add_link_options("LINKER:-z,relro" "LINKER:-z,now" "LINKER:-z,noexecstack")
+    endif()
+  else()
+    add_compile_options(/guard:cf)
+    add_link_options(/guard:cf /DYNAMICBASE /NXCOMPAT)
+    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+      add_link_options(/HIGHENTROPYVA)
+    endif()
+  endif()
 endif()
 
 # ---- Lexilla (static) ------------------------------------------------------
