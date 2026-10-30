@@ -247,6 +247,62 @@ private slots:
     w.query->setText("o.");
     QVERIFY(w.find());
   }
+  // ---- catastrophic regular expressions -----------------------------------
+  // `(a+)+$` against a run of 'a' ending in 'b' backtracks exponentially.
+  // Boost.Regex must give up (error_complexity) quickly and the editor must
+  // report it instead of freezing the UI thread.
+  void catastrophicRegexIsBounded() {
+    const QByteArray text = QByteArray(4000, 'a') + "b\n";
+    const QString pattern = "(a+)+$";
+    Window w(true);
+    auto *t = w.newDocument(text);
+    w.regex->setChecked(true);
+    w.query->setText(pattern);
+    QElapsedTimer timer;
+    timer.start();
+    QVERIFY(!w.find());
+    QVERIFY2(timer.elapsed() < 5000,
+             qPrintable(QString("find took %1 ms").arg(timer.elapsed())));
+    QVERIFY2(w.statusBar()->currentMessage().contains("too complex"),
+             qPrintable(w.statusBar()->currentMessage()));
+    timer.restart();
+    QCOMPARE(w.markAll(), 0);
+    QCOMPARE(w.replaceAll(), 0);
+    QCOMPARE(t->text(), text); // nothing was replaced
+    QVERIFY2(timer.elapsed() < 10000,
+             qPrintable(QString("mark/replace took %1 ms").arg(timer.elapsed())));
+    // Find in files stops on the first pathological file instead of
+    // spending the budget again on every other file.
+    QTemporaryDir dir;
+    for (int i = 0; i < 20; ++i)
+      put(dir.filePath(QString("f%1.txt").arg(i)), text);
+    timer.restart();
+    QCOMPARE(w.findInFiles(dir.path(), "*.txt"), 0);
+    QVERIFY2(timer.elapsed() < 10000,
+             qPrintable(QString("find in files took %1 ms").arg(timer.elapsed())));
+    QVERIFY2(w.statusBar()->currentMessage().contains("too complex"),
+             qPrintable(w.statusBar()->currentMessage()));
+    QVERIFY(!w.searching);
+    // The editor recovers: an ordinary search afterwards works.
+    w.query->setText("a+b");
+    QVERIFY(w.find());
+    QCOMPARE(w.findInFiles(dir.path(), "*.txt"), 20);
+    // Invalid patterns are now reported as such (previously the error code
+    // from the regex wrapper never reached the status bar).
+    w.query->setText("(unclosed");
+    QVERIFY(!w.find());
+    QCOMPARE(w.statusBar()->currentMessage(), QString("Invalid regular expression"));
+    // The budget scales with the text: a linear-time pattern that has to try
+    // every position of a large document must not be cut off.
+    QByteArray big;
+    for (int i = 0; big.size() < 8 * 1024 * 1024; ++i)
+      big += "lorem ipsum dolor sit amet " + QByteArray::number(i) + "\n";
+    t->setText(big + "needle42\n");
+    t->primary->send(SCI_GOTOPOS, 0);
+    w.query->setText("\\w+\\d{2}\\n(?!.)");
+    QVERIFY2(w.find(), qPrintable(w.statusBar()->currentMessage()));
+    QCOMPARE(t->primary->send(SCI_GETSELECTIONSTART), sptr_t(big.size()));
+  }
   void wholeWordAndCaseOptions() {
     Window w(true);
     auto *t = w.newDocument("Cat cat concat CAT_x cat.");
@@ -1055,9 +1111,10 @@ private slots:
 
 int runEdgeCases() {
   EdgeCases test;
-  int argc = 1;
-  char name[] = "edge-cases";
-  char *argv[] = {name, nullptr};
-  return QTest::qExec(&test, argc, argv);
+  // VELOX_TEST_ONLY="fnA fnB" runs just those edge-case functions (for
+  // iterating on one test); unset runs everything.
+  QStringList args{"edge-cases"};
+  args += qEnvironmentVariable("VELOX_TEST_ONLY").split(' ', Qt::SkipEmptyParts);
+  return QTest::qExec(&test, args);
 }
 #include "edge_cases.moc"

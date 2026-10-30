@@ -42,6 +42,9 @@ static QDomDocument xml(const QString &path) {
   return d;
 }
 static constexpr int markIndicator = 31;
+// Defined in vendor/boostregex/BoostRegExSearch.cxx: error code of the last
+// failed regex search (boost::regex_constants::error_type, 0 when none).
+int veloxRegexErrorCode();
 // Installed builds keep data in <prefix>/share/velox; development builds run
 // from build/app/bin next to the repository's share directory.
 QString dataPath(const QString &file) {
@@ -1649,7 +1652,13 @@ int Window::replaceAll() {
 bool Window::regexFailed(ScintillaEditBase *e) {
   if (e->send(SCI_GETSTATUS) != SC_STATUS_WARN_REGEX)
     return false;
-  statusBar()->showMessage("Invalid regular expression", 4000);
+  // 18 is boost::regex_constants::error_complexity: the matcher hit its state
+  // budget (catastrophic backtracking) rather than rejecting the pattern.
+  statusBar()->showMessage(veloxRegexErrorCode() == 18
+                               ? "Regular expression is too complex for this "
+                                 "text (search stopped)"
+                               : "Invalid regular expression",
+                           6000);
   e->send(SCI_SETSTATUS, SC_STATUS_OK);
   return true;
 }
@@ -1804,7 +1813,11 @@ int Window::findInFiles(const QString &root, const QString &patterns) {
       if (start <= pos)
         break;
     }
+    // An invalid pattern fails on every file, and one that is too complex
+    // for this file has already spent its budget: stop instead of paying it
+    // again for each remaining file.
     if (regexFailed(scanner)) {
+      scanner->send(SCI_CLEARALL);
       results->clear();
       return 0;
     }

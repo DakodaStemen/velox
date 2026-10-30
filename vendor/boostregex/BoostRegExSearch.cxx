@@ -44,6 +44,17 @@
 #include "AnsiDocumentIterator.h"
 #include "BoostRegexSearch.h"
 
+// Velox: Boost.Regex aborts a match with error_complexity once it has
+// visited BOOST_REGEX_MAX_STATE_COUNT states. Scintilla's document iterators
+// are only bidirectional, so Boost cannot size that budget from the text
+// length and falls back to the 100M-state default: several seconds of frozen
+// UI per catastrophic pattern such as (a+)+$. The macro expands to a variable
+// so each search sets a budget that scales with the searched range (see
+// FindText); it is only read at run time, never in a constant expression.
+#include <cstddef>
+static thread_local std::ptrdiff_t veloxRegexStateLimit = 100000000;
+#define BOOST_REGEX_MAX_STATE_COUNT veloxRegexStateLimit
+
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wconversion"
@@ -271,6 +282,26 @@ RegexSearchBase *CreateRegexSearch(CharClassify* /* charClassTable */)
 }
 
 std::string g_exceptionMessage;
+static int g_exceptionCode = 0;
+
+// Velox: boost::regex_constants::error_type of the last failed search (0 when
+// it succeeded or failed for another reason), e.g. 18 = error_complexity.
+int veloxRegexErrorCode()
+{
+	return g_exceptionCode;
+}
+
+// Per-search state budget: generous per character so linear-time patterns on
+// large files never trip it, bounded so a pathological pattern fails in well
+// under a second on typical files and never takes longer than the old default.
+static std::ptrdiff_t stateBudget(Sci::Position rangeLength)
+{
+	const std::ptrdiff_t perChar = 256, floor = 4000000, ceiling = 100000000;
+	const std::ptrdiff_t length = rangeLength < 0 ? 0 : static_cast<std::ptrdiff_t>(rangeLength);
+	if (length > ceiling / perChar)
+		return ceiling;
+	return (std::max)(floor, length * perChar);
+}
 
 /**
  * Find text in document, supporting both forward and backward
@@ -281,6 +312,8 @@ Sci::Position BoostRegexSearch::FindText(Document* doc, Sci::Position startPosit
 						bool caseSensitive, bool /*word*/, bool /*wordStart*/, Scintilla::FindOption sciSearchFlags, Sci::Position *lengthRet)
 {
 	g_exceptionMessage.clear();
+	g_exceptionCode = 0;
+	veloxRegexStateLimit = stateBudget(endPosition > startPosition ? endPosition - startPosition : startPosition - endPosition);
 	try {
 		SearchParameters search{};
 
@@ -341,23 +374,32 @@ Sci::Position BoostRegexSearch::FindText(Document* doc, Sci::Position startPosit
 		}
 	}
 
+	// Velox: failures are reported the way Scintilla's own regex engine does,
+	// by throwing RegexError: Editor turns that into SC_STATUS_WARN_REGEX and
+	// returns -1. The old -2/-3 return values were treated as a match position
+	// by Editor::SearchInTarget and never reached the application as an error.
 	catch(regex_error& ex)
 	{
-		// -1 is normally used for not found, -2 is used here for invalid regex
 		g_exceptionMessage = ex.what();
-		return -2;
+		g_exceptionCode = static_cast<int>(ex.code());
+		throw RegexError();
 	}
 
 	catch(boost::wrapexcept<std::runtime_error>& ex)
 	{
 		g_exceptionMessage = ex.what();
-		return -3;
+		throw RegexError();
+	}
+
+	catch(RegexError&)
+	{
+		throw;
 	}
 
 	catch(...)
 	{
 		g_exceptionMessage = "Unexpected exception while searching";
-		return -3;
+		throw RegexError();
 	}
 }
 
