@@ -18,9 +18,16 @@ struct DocumentData {
   static bool read(const QString &path, DocumentData &out, QString &error,
                    const QString &fallback = {}, ReadError *kind = nullptr,
                    bool computeHash = true);
+  // `conflict` (optional) is set when the only reason for refusing is that
+  // the file changed or disappeared on disk since it was loaded; the caller
+  // may then ask the user and retry with overwriteChanged.
   bool write(const QByteArray &text, const QString &destination, QString &error,
-             bool overwriteChanged = false);
+             bool overwriteChanged = false, bool *conflict = nullptr);
   void stamp();
+  // True when `file` (default: path) is still a regular file with the
+  // contents loaded or last saved. Never opens FIFOs or devices and reads at
+  // most the loaded size (maxFileSize when that is unknown).
+  bool unchangedOnDisk(const QString &file = {}) const;
   // `text` is only used (and only needs to be fetched) when needsBackup().
   bool needsBackup(bool dirty) const { return dirty || path.isEmpty(); }
   QJsonObject json(bool dirty, const QByteArray &text = {}) const;

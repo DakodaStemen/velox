@@ -196,7 +196,10 @@ bool DocumentData::read(const QString &name, DocumentData &out, QString &error,
   return true;
 }
 bool DocumentData::write(const QByteArray &text, const QString &name,
-                         QString &error, bool overwriteChanged) {
+                         QString &error, bool overwriteChanged,
+                         bool *conflict) {
+  if (conflict)
+    *conflict = false;
   const QString absolute = QFileInfo(name).absoluteFilePath();
   QFileInfo info(absolute);
   QString destination = info.isSymLink() ? info.canonicalFilePath() : absolute;
@@ -232,15 +235,12 @@ bool DocumentData::write(const QByteArray &text, const QString &name,
   }
   const bool same = absolute == path;
   if (same && exists && !overwriteChanged) {
-    QFile old(destination);
-    if (!old.open(QIODevice::ReadOnly)) {
-      error = "The original file was removed or is inaccessible. Use Save As.";
-      return false;
-    }
-    QByteArray previous = old.readAll();
-    if (old.error() != QFileDevice::NoError || hash(previous) != diskHash) {
-      error = "The file changed on disk since it was opened. Reload it or use "
-              "Save As to keep both versions.";
+    if (!unchangedOnDisk(destination)) {
+      error = QFileInfo::exists(destination)
+                  ? "The file changed on disk since it was opened."
+                  : "The file was removed or renamed since it was opened.";
+      if (conflict)
+        *conflict = true;
       return false;
     }
   }
@@ -284,6 +284,24 @@ bool DocumentData::write(const QByteArray &text, const QString &name,
   utf8 = text;
   stamp();
   return true;
+}
+bool DocumentData::unchangedOnDisk(const QString &file) const {
+  const QString name = file.isEmpty() ? path : file;
+  // isFile() is false for FIFOs and devices, which would block or never end.
+  const QFileInfo info(name);
+  if (!info.isFile())
+    return false;
+  // A known size that differs is a change, and needs no read. An unknown
+  // size (a document restored from a session) is bounded by maxFileSize.
+  const qint64 limit = diskSize >= 0 ? diskSize : maxFileSize;
+  if (info.size() > limit || (diskSize >= 0 && info.size() != diskSize))
+    return false;
+  QFile f(name);
+  if (!f.open(QIODevice::ReadOnly) || f.isSequential() || f.size() > limit)
+    return false;
+  const QByteArray raw = f.read(f.size() + 1); // bounded even if it grows
+  return f.error() == QFileDevice::NoError && raw.size() <= limit &&
+         hash(raw) == diskHash;
 }
 void DocumentData::stamp() {
   QFileInfo info(path);

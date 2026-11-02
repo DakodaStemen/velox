@@ -889,10 +889,8 @@ EditorTab *Window::newDocument(const QByteArray &text) {
       refresh();
     });
     connect(ed, &ScintillaEditBase::updateUi, this, [this] { refresh(); });
-    connect(ed, &ScintillaEditBase::notifyChange, this, [this, t] {
-      dismissedChanges.remove(t);
-      outlineTimer.start(700);
-    });
+    connect(ed, &ScintillaEditBase::notifyChange, this,
+            [this] { outlineTimer.start(700); });
     connect(ed, &ScintillaEditBase::marginClicked, this,
             [ed](Scintilla::Position pos, Scintilla::KeyMod, int margin) {
               if (margin != 1)
@@ -1164,9 +1162,37 @@ bool Window::save(EditorTab *t, bool saveAs) {
   if (prefs.finalNewline)
     ensureFinalNewline(t);
   QString error;
-  if (!t->data.write(t->text(), path, error)) {
-    report(error);
-    return false;
+  bool conflict = false;
+  const QByteArray text = t->text();
+  // An explicit Save As was already confirmed by the file dialog.
+  if (!t->data.write(text, path, error, saveAs, &conflict)) {
+    if (!conflict) {
+      report(error);
+      return false;
+    }
+    bool overwrite = false;
+    if (confirmOverwrite)
+      overwrite = confirmOverwrite(t, error);
+    else if (!testing) {
+      QMessageBox box(QMessageBox::Warning, "Velox",
+                      error + "\n\nSave your version of " + t->title() +
+                          " anyway? Changes made by the other program will "
+                          "be overwritten.",
+                      QMessageBox::Cancel, this);
+      auto *yes = box.addButton("Overwrite", QMessageBox::DestructiveRole);
+      box.setDefaultButton(QMessageBox::Cancel);
+      box.exec();
+      overwrite = box.clickedButton() == yes;
+    }
+    if (!overwrite) {
+      if (testing && !confirmOverwrite)
+        qWarning().noquote() << error;
+      return false;
+    }
+    if (!t->data.write(text, path, error, true)) {
+      report(error);
+      return false;
+    }
   }
   t->metadataDirty = false;
   t->primary->send(SCI_SETSAVEPOINT);
@@ -1998,22 +2024,28 @@ void Window::rebuildOutline() {
 void Window::checkDisk() {
   for (int i = 0; i < tabs->count(); ++i) {
     auto *t = static_cast<EditorTab *>(tabs->widget(i));
-    if (!t->data.exists || dismissedChanges.contains(t))
+    if (!t->data.exists)
       continue;
-    QFileInfo info(t->data.path);
-    if (info.exists() && info.lastModified() == t->data.diskTime &&
-        info.size() == t->data.diskSize)
-      continue;
-    QFile f(t->data.path);
-    QByteArray raw;
-    if (f.open(QIODevice::ReadOnly))
-      raw = f.readAll();
-    if (f.isOpen() && QCryptographicHash::hash(raw, QCryptographicHash::Sha256) ==
-                          t->data.diskHash) {
-      t->data.stamp(); // touched, content identical
+    const QFileInfo info(t->data.path);
+    const QPair<QDateTime, qint64> state{
+        info.exists() ? info.lastModified() : QDateTime(),
+        info.exists() ? info.size() : -1};
+    if (info.exists() && state.first == t->data.diskTime &&
+        state.second == t->data.diskSize) {
+      dismissedChanges.remove(t); // e.g. restored to what was loaded
       continue;
     }
-    dismissedChanges.insert(t);
+    auto reported = dismissedChanges.constFind(t);
+    if (reported != dismissedChanges.constEnd() && *reported == state)
+      continue; // already reported, and nothing new happened since
+    // Bounded: never opens a FIFO or device and never reads more than the
+    // loaded size, so a replaced file cannot hang or exhaust the editor.
+    if (t->data.unchangedOnDisk()) {
+      t->data.stamp(); // touched, content identical
+      dismissedChanges.remove(t);
+      continue;
+    }
+    dismissedChanges.insert(t, state);
     statusBar()->showMessage(
         info.fileName() + " changed or disappeared on disk. Use File → "
                           "Reload, or Save As to keep your edits.",
@@ -2035,10 +2067,16 @@ void Window::playMacro() {
   }
   e->send(SCI_ENDUNDOACTION);
 }
-void Window::saveSession(const QString &path, bool onlyIfChanged) {
+void Window::saveSession(const QString &path, bool onlyIfChanged,
+                         const QSet<EditorTab *> &omit) {
   QJsonArray docs;
+  int active = 0;
   for (int i = 0; i < tabs->count(); ++i) {
     auto *t = static_cast<EditorTab *>(tabs->widget(i));
+    if (omit.contains(t))
+      continue;
+    if (i == tabs->currentIndex())
+      active = docs.size();
     // Only dirty/untitled tabs need their text (and its compression).
     const bool dirty = t->dirty();
     auto o = t->data.json(dirty, t->data.needsBackup(dirty) ? t->text()
@@ -2052,7 +2090,7 @@ void Window::saveSession(const QString &path, bool onlyIfChanged) {
   }
   const auto b = QJsonDocument(QJsonObject{{"version", 1},
                                            {"documents", docs},
-                                           {"active", tabs->currentIndex()}})
+                                           {"active", active}})
                      .toJson();
   const QByteArray digest = QCryptographicHash::hash(b, QCryptographicHash::Sha1);
   if (onlyIfChanged && digest == lastSessionHash && QFile::exists(path))
@@ -2192,19 +2230,28 @@ void Window::closeEvent(QCloseEvent *event) {
     if (choice == QMessageBox::Discard)
       discarded.insert(t);
   }
+  finishClose(discarded);
+  event->accept();
+}
+void Window::finishClose(const QSet<EditorTab *> &discarded) {
   recoveryTimer.stop();
+  // A discarded file is reopened clean from disk next time. A discarded
+  // untitled tab has nothing on disk, so it is left out: otherwise its text
+  // would be written to the session as a backup and come back on next launch.
+  QSet<EditorTab *> omit;
   for (auto *t : discarded) {
     t->metadataDirty = false;
     t->primary->send(SCI_SETSAVEPOINT);
+    if (t->data.path.isEmpty())
+      omit.insert(t);
   }
   if (shared)
-    saveSession(sessionPath); // becomes the next launch's session
+    saveSession(sessionPath, false, omit); // the next launch's session
   else
     QFile::remove(sessionPath); // clean exit: nothing left to recover
   settings.setValue("geometry", saveGeometry());
   settings.setValue("recent", recent);
   settings.setValue("theme", themeChoice->currentText());
-  event->accept();
 }
 void Window::trimTrailingWhitespace(EditorTab *t) {
   if (!t)
