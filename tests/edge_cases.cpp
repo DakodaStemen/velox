@@ -8,7 +8,10 @@
 #include "window.h"
 #include <QTextCodec>
 #include <QtTest>
+#include <atomic>
+#include <thread>
 #ifdef Q_OS_UNIX
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #endif
@@ -641,6 +644,168 @@ private slots:
     w.checkDisk();
     QVERIFY(w.statusBar()->currentMessage().startsWith("t.txt changed"));
     QVERIFY(!w.save(w.current())); // refuses to recreate silently
+  }
+  void saveAfterExternalChangeAsksBeforeOverwriting() {
+    QTemporaryDir dir;
+    QString p = dir.filePath("c.txt");
+    put(p, "original\n");
+    Window w(true);
+    QVERIFY(w.openFile(p));
+    auto *t = w.current();
+    t->setText("mine\n", true);
+    QTest::qWait(20);
+    put(p, "theirs, a longer line\n"); // e.g. git checkout
+    int asked = 0;
+    QString reason;
+    bool answer = false;
+    w.confirmOverwrite = [&](EditorTab *tab, const QString &why) {
+      asked += tab == t ? 1 : 100; // QCOMPARE cannot return a bool
+      reason = why;
+      return answer;
+    };
+    // Declined: nothing written, still dirty.
+    QVERIFY(!w.save(t));
+    QCOMPARE(asked, 1);
+    QVERIFY(reason.contains("changed on disk"));
+    QCOMPARE(get(p), QByteArray("theirs, a longer line\n"));
+    QVERIFY(t->dirty());
+    // Accepted: our text replaces theirs, and the next save needs no prompt.
+    answer = true;
+    QVERIFY(w.save(t));
+    QCOMPARE(get(p), QByteArray("mine\n"));
+    QVERIFY(!t->dirty());
+    t->setText("mine again\n", true);
+    QVERIFY(w.save(t));
+    QCOMPARE(asked, 2);
+    // Same-size change with different content is still a conflict.
+    put(p, "MINE AGAIN\n");
+    t->setText("third\n", true);
+    answer = false;
+    QVERIFY(!w.save(t));
+    QCOMPARE(asked, 3);
+    QCOMPARE(get(p), QByteArray("MINE AGAIN\n"));
+    // Deleted on disk: asks, then recreates the file.
+    QVERIFY(QFile::remove(p));
+    answer = true;
+    QVERIFY(w.save(t));
+    QCOMPARE(asked, 4);
+    QVERIFY(reason.contains("removed"));
+    QCOMPARE(get(p), QByteArray("third\n"));
+    // Other failures are never offered as an overwrite.
+    t->setText(QString::fromUtf8("emoji 🌍\n").toUtf8(), true);
+    w.encodingChoice->setCurrentText("Windows-1252");
+    QVERIFY(!w.save(t));
+    QCOMPARE(asked, 4);
+    // A tab restored from a session backup has no recorded size; an
+    // unchanged file must still save without a prompt.
+    DocumentData d;
+    QString error;
+    QVERIFY(DocumentData::read(p, d, error));
+    auto restored = DocumentData::fromJson(d.json(true, "restored\n"));
+    QCOMPARE(restored.diskSize, qint64(-1));
+    bool conflict = true;
+    QVERIFY(restored.write("restored\n", p, error, false, &conflict));
+    QVERIFY(!conflict);
+  }
+  void checkDiskNeverBlocksOnReplacedFiles() {
+#ifdef Q_OS_WIN
+    QSKIP("needs POSIX FIFOs and /dev/zero");
+#else
+    QTemporaryDir dir;
+    QString p = dir.filePath("f.txt");
+    put(p, "text\n");
+    Window w(true);
+    QVERIFY(w.openFile(p));
+    // Replaced by a FIFO: opening it for reading would block until a writer
+    // appears. A watchdog writer unblocks a broken checkDisk after 3 s, so a
+    // regression fails on time instead of hanging the suite.
+    QVERIFY(QFile::remove(p));
+    QVERIFY(::mkfifo(QFile::encodeName(p), 0600) == 0);
+    std::atomic<bool> done{false};
+    std::thread watchdog([&] {
+      for (int i = 0; i < 60 && !done; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      if (done)
+        return;
+      const int fd = ::open(QFile::encodeName(p), O_WRONLY | O_NONBLOCK);
+      if (fd >= 0)
+        ::close(fd);
+    });
+    QElapsedTimer clock;
+    clock.start();
+    w.checkDisk();
+    const qint64 elapsed = clock.elapsed();
+    done = true;
+    watchdog.join();
+    QVERIFY2(elapsed < 2000, qPrintable(QString("took %1 ms").arg(elapsed)));
+    QVERIFY(w.statusBar()->currentMessage().startsWith("f.txt changed"));
+    // Replaced by a link to an endless device: reported, never read.
+    QVERIFY(QFile::remove(p));
+    QVERIFY(::symlink("/dev/zero", QFile::encodeName(p)) == 0);
+    w.statusBar()->clearMessage();
+    clock.restart();
+    w.checkDisk();
+    QVERIFY(clock.elapsed() < 2000);
+    QVERIFY(w.statusBar()->currentMessage().startsWith("f.txt changed"));
+    // Saving over it is refused without reading it either.
+    w.confirmOverwrite = [](EditorTab *, const QString &) { return false; };
+    QVERIFY(!w.save(w.current()));
+#endif
+  }
+  void externalChangeReportedOnceUntilDiskChangesAgain() {
+    QTemporaryDir dir;
+    QString p = dir.filePath("r.txt");
+    put(p, "one\n");
+    Window w(true);
+    QVERIFY(w.openFile(p));
+    auto *t = w.current();
+    QTest::qWait(20);
+    put(p, "two, longer\n");
+    w.checkDisk();
+    QVERIFY(w.statusBar()->currentMessage().startsWith("r.txt changed"));
+    // Editing does not re-arm the report (and the file is not re-read).
+    w.statusBar()->clearMessage();
+    t->primary->send(SCI_APPENDTEXT, 1, reinterpret_cast<sptr_t>("x"));
+    w.checkDisk();
+    QVERIFY(w.statusBar()->currentMessage().isEmpty());
+    // A further change on disk is reported again.
+    put(p, "three, longer still\n");
+    QFile(p).setFileTime(QDateTime::currentDateTime().addSecs(10),
+                         QFileDevice::FileModificationTime);
+    w.checkDisk();
+    QVERIFY(w.statusBar()->currentMessage().startsWith("r.txt changed"));
+  }
+  void discardedUntitledTabsAreNotRestored() {
+    QTemporaryDir dir;
+    QString session = dir.filePath("recovery.json"), file = dir.filePath("k.txt");
+    put(file, "on disk\n");
+    Window w(true);
+    w.sessionPath = session;
+    QVERIFY(w.openFile(file));
+    auto *titled = w.current();
+    titled->setText("edited, discarded\n", true);
+    auto *kept = w.newDocument("kept untitled\n");
+    kept->setText("kept untitled\n", true);
+    auto *secret = w.newDocument();
+    secret->setText("discarded secret\n", true);
+    w.finishClose({titled, secret});
+    const auto docs = QJsonDocument::fromJson(get(session))
+                          .object()["documents"].toArray();
+    QCOMPARE(docs.size(), 2);
+    QByteArray all;
+    for (const auto &v : docs)
+      all += DocumentData::fromJson(v.toObject()).utf8;
+    QVERIFY(!all.contains("discarded secret"));
+    QVERIFY(!all.contains("edited, discarded"));
+    QVERIFY(all.contains("kept untitled"));
+    Window next(true);
+    next.sessionPath = session;
+    next.restore();
+    QCOMPARE(next.tabs->count(), 2);
+    for (int i = 0; i < next.tabs->count(); ++i) {
+      auto *t = static_cast<EditorTab *>(next.tabs->widget(i));
+      QVERIFY(!t->text().contains("discarded"));
+    }
   }
 
   // ---- languages, themes, UI actions ---------------------------------------

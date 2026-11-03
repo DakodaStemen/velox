@@ -18,6 +18,9 @@ All notable changes to this project are documented in this file. Versions follow
 - CI: Ubuntu 24.04 build, ASan + UBSan build (`CONFIG+=sanitizer`), version consistency check, least-privilege permissions, pinned actions and Dependabot updates.
 - Tag-triggered release workflow that publishes a source tarball with notes from this changelog.
 ### Fixed
+- Saving a file that another program changed or deleted now asks whether to overwrite it instead of refusing, so it can be saved to its own path again; Save As to the same path no longer refuses.
+- The external-change check no longer hangs on a file replaced by a FIFO or device, never reads more than the file's loaded size, and no longer re-reads a changed file every 3 s while you type.
+- Discarding an unsaved untitled tab when quitting no longer brings its text back on the next launch.
 - 16 languages (ActionScript, ASP, AutoIt, Baan C, COBOL, Fortran 77, Go, JavaScript (js), JSON5, JSP, NFO, PHP, PostScript, RC, Scheme, Swift) had no matching Lexilla lexer and rendered as plain text; they now map to the correct lexers (NFO stays plain text). JSON5 allows comments. A self-test guards against future regressions.
 ### Added
 - Files that are not valid UTF-8 can be reopened with a chosen legacy encoding; the encoding lists now also include ISO-8859-15, EUC-KR, Big5 and Windows-1251.

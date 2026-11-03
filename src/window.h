@@ -58,6 +58,10 @@ public:
   EditorTab *newDocument(const QByteArray &text = {});
   bool openFile(const QString &path, const QString &fallback = {});
   bool save(EditorTab *tab, bool saveAs = false);
+  // Asked when a save would overwrite a file changed or removed on disk since
+  // it was loaded; receives the reason, returns true to overwrite. Unset, it
+  // shows a dialog (or, when testing, declines).
+  std::function<bool(EditorTab *, const QString &)> confirmOverwrite;
   bool closeTab(int index);
   void applyLanguage(EditorTab *tab, const QString &language);
   void applyTheme(EditorTab *tab);
@@ -87,6 +91,9 @@ public:
   void openResult(QTreeWidgetItem *item);
   void checkDisk();
   void snapshot();
+  // The part of closing that follows the unsaved-changes prompts: `discarded`
+  // are the tabs the user chose to discard.
+  void finishClose(const QSet<EditorTab *> &discarded);
   void restore();
   QStringList adoptOrphans(const QString &directory);
   static bool pidAlive(qint64 pid);
@@ -137,7 +144,9 @@ private:
   void bookmark(bool next = false, bool previous = false);
   void playMacro();
   bool restoreSession(const QString &path);
-  void saveSession(const QString &path, bool onlyIfChanged = false);
+  // Tabs in `omit` are left out of the session entirely.
+  void saveSession(const QString &path, bool onlyIfChanged = false,
+                   const QSet<EditorTab *> &omit = {});
   bool canClose(EditorTab *tab);
   void report(const QString &message);
   QAction *action(QMenu *menu, const QString &name,
@@ -158,7 +167,10 @@ private:
   QTreeView *files;
   QTimer recoveryTimer, outlineTimer, diskTimer;
   QSettings settings;
-  QSet<EditorTab *> dismissedChanges;
+  // Tabs whose external change was already reported, with the disk state
+  // (modification time, size; size -1 when missing) at that report. A tab is
+  // reported again only when that state changes.
+  QHash<EditorTab *, QPair<QDateTime, qint64>> dismissedChanges;
   QMenu *recentMenu;
   int counter = 1;
 };
