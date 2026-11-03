@@ -6,6 +6,12 @@ All notable changes to this project are documented in this file. Versions follow
 ## [Unreleased]
 
 ### Added
+- Engineering baseline (2026-11-03): `Makefile` (`help setup lint test build ci`), `tests/scripts_test.sh` (6 checks of `scripts/check-version.sh` and `scripts/check-hardening.py`), `.markdownlint-cli2.jsonc`, `.pre-commit-config.yaml`, `docs/adr/` with ADR-0001, and a markdown lint job in CI.
+
+### Changed
+- CI: `timeout-minutes` on every job. Dependabot: 7-day cooldown.
+
+### Added
 - Command palette (Ctrl+Shift+P) listing every menu action and Quick open (Ctrl+P) for files under the sidebar folder, both with fuzzy matching.
 
 ### Changed

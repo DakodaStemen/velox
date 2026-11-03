@@ -13,6 +13,7 @@ permissions:
 jobs:
   appimage:
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     env:
       APPIMAGE_EXTRACT_AND_RUN: 1
       QMAKE: /usr/lib/qt6/bin/qmake6
