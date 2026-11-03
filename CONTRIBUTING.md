@@ -21,6 +21,19 @@ produces the production binary without it, and `SANITIZE=1 ./build.sh` adds ASan
 After the first build, `make -C build/app` rebuilds only the application. [docs/architecture.md](docs/architecture.md)
 explains where things live.
 
+## Checks before you push
+
+`make ci` runs lint (version consistency, `shellcheck --severity=error`, Python syntax check,
+markdownlint), `./build.sh`, the script tests in `tests/scripts_test.sh` and `velox --self-test`.
+Pass `QT=6` for a Qt 6 build. Optional: `pre-commit install` runs fast checks on each commit
+(`.pre-commit-config.yaml`).
+
+## Branches and pull requests
+
+- Branch prefixes: `feat/`, `fix/`, `docs/`, `chore/`, `ci/`, `test/`.
+- PR titles follow Conventional Commits (`feat: ...`, `fix: ...`, `chore: ...`), one purpose per PR.
+- Decisions that shape the architecture are recorded in [docs/adr](docs/adr/README.md).
+
 ## Reporting bugs and requesting features
 
 Search existing issues first. For bugs, include your distribution, Velox version

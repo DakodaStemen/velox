@@ -1,0 +1,33 @@
+{
+  "config": {
+    "default": true,
+    "MD013": false,
+    // Relaxed because the existing CHANGELOG and README predate this config; not worth a mass rewrite.
+    "MD022": false,
+    "MD024": false,
+    "MD032": false,
+    "MD040": false,
+    "MD033": false,
+    "MD034": false,
+    "MD036": false,
+    "MD041": false,
+    "MD047": false,
+    "MD060": false,
+    "MD046": {
+      "style": "fenced"
+    }
+  },
+  "globs": [
+    "**/*.md"
+  ],
+  "ignores": [
+    "node_modules/**",
+    "**/node_modules/**",
+    "dist/**",
+    ".git/**",
+    ".worktrees/**",
+    "target/**",
+    "build/**",
+    "vendor/**"
+  ]
+}

@@ -16,6 +16,7 @@ jobs:
   build-and-test:
     name: ${{ matrix.name }}
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     container: archlinux:latest
     strategy:
       fail-fast: false
@@ -74,6 +75,7 @@ jobs:
 
   ubuntu:
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -94,6 +96,7 @@ jobs:
   # ubuntu:24.04 container to prove the declared dependencies are sufficient.
   deb-install:
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -123,6 +126,7 @@ jobs:
   cmake:
     name: CMake (${{ matrix.os }}, Qt ${{ matrix.qt }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -225,3 +229,20 @@ jobs:
             build-release/velox-*.rpm
             build-release/velox-*.tar.gz
           if-no-files-found: error
+
+  docs:
+    name: Markdown lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: npx -y markdownlint-cli2 "**/*.md"
+
+  scripts:
+    name: Script tests and shellcheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: tests/scripts_test.sh
+      - run: shellcheck --severity=error build.sh run.sh scripts/*.sh packaging/appimage/build-appimage.sh
