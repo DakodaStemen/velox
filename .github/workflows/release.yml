@@ -94,7 +94,7 @@ jobs:
         run: |
           ./linuxdeploy-x86_64.AppImage --appdir AppDir --plugin qt \
             --desktop-file AppDir/usr/share/applications/io.github.DakodaStemen.Velox.desktop \
-            --icon-file AppDir/usr/share/icons/hicolor/scalable/apps/io.github.DakodaStemen.Velox.svg \
+            --icon-file AppDir/usr/share/icons/hicolor/256x256/apps/io.github.DakodaStemen.Velox.png \
             --output appimage
           sha256sum Velox-*.AppImage > SHA256SUMS-appimage.txt
 

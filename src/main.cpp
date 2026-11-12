@@ -91,8 +91,12 @@ int main(int argc, char **argv) {
   QCoreApplication::setApplicationVersion(QStringLiteral(VELOX_VERSION));
   QGuiApplication::setApplicationDisplayName("Velox");
   QGuiApplication::setDesktopFileName("io.github.DakodaStemen.Velox");
-  QApplication::setWindowIcon(
-      QIcon::fromTheme("io.github.DakodaStemen.Velox", QIcon(":/velox.svg")));
+  // Multi-size embedded icon: every dock/taskbar/title bar picks the closest
+  // pre-rendered size (no Qt SVG plugin needed, same look when not installed).
+  QIcon appIcon;
+  for (int n : {16, 22, 24, 32, 48, 64, 128, 256})
+    appIcon.addFile(QStringLiteral(":/icons/velox-%1.png").arg(n), QSize(n, n));
+  QApplication::setWindowIcon(appIcon);
   QCommandLineParser parser;
   parser.setApplicationDescription(
       "Velox — a fast native text editor built on Scintilla and Lexilla");

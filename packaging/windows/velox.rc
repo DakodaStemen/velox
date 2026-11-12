@@ -1,0 +1,3 @@
+// Embeds the application icon in velox.exe (Explorer, taskbar, Alt-Tab).
+// The path is relative to this file.
+IDI_ICON1 ICON "velox.ico"
