@@ -260,6 +260,7 @@ private slots:
     put(a, "first\n");
     put(b, "second\n");
     Window w(true);
+    w.prefs.autoReload = false; // clean tabs would otherwise just reload
     QVERIFY(w.openFile(a));
     QVERIFY(w.openFile(b));
     w.checkDisk();

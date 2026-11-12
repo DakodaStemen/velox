@@ -5,6 +5,9 @@ All notable changes to this project are documented in this file. Versions follow
 
 ## [Unreleased]
 
+### Changed
+- Open tabs without unsaved edits now follow their file: when another program changes it on disk, the tab reloads in place (caret and scroll position kept) and the status bar says so. Tabs with unsaved edits are still only reported. Turn it off in Preferences ("Reload unmodified files changed on disk"). Devices, FIFOs and files over 32 MiB are never auto-read.
+
 ### Added
 - Engineering baseline (2026-11-03): `Makefile` (`help setup lint test build ci`), `tests/scripts_test.sh` (6 checks of `scripts/check-version.sh` and `scripts/check-hardening.py`), `.markdownlint-cli2.jsonc`, `.pre-commit-config.yaml`, `docs/adr/` with ADR-0001, and a markdown lint job in CI.
 

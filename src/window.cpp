@@ -200,6 +200,7 @@ void Preferences::load(const QSettings &s) {
   completion = s.value("editor/completion", d.completion).toBool();
   trimOnSave = s.value("save/trimTrailingWhitespace", d.trimOnSave).toBool();
   finalNewline = s.value("save/finalNewline", d.finalNewline).toBool();
+  autoReload = s.value("files/autoReload", d.autoReload).toBool();
   zoom = qBound(-10, s.value("view/zoom", d.zoom).toInt(), 20);
 }
 void Preferences::store(QSettings &s) const {
@@ -215,6 +216,7 @@ void Preferences::store(QSettings &s) const {
   s.setValue("editor/completion", completion);
   s.setValue("save/trimTrailingWhitespace", trimOnSave);
   s.setValue("save/finalNewline", finalNewline);
+  s.setValue("files/autoReload", autoReload);
   s.setValue("view/zoom", zoom);
 }
 EditorTab::EditorTab(QWidget *parent) : QWidget(parent) {
@@ -614,17 +616,8 @@ void Window::buildMenus() {
                               "Discard unsaved edits and reload?") !=
             QMessageBox::Yes)
       return;
-    DocumentData d;
     QString error;
-    if (DocumentData::read(t->data.path, d, error, t->data.encoding)) {
-      QScopedValueRollback<bool> quiet(suppressMacro, true);
-      t->data = d;
-      t->large = d.utf8.size() > largeFileSize;
-      t->setText(d.utf8);
-      dismissedChanges.remove(t);
-      applyLanguage(t, t->language);
-      refresh();
-    } else
+    if (!reloadTab(t, error))
       report(error);
   });
   f->addSeparator();
@@ -1565,6 +1558,7 @@ void Window::showPreferences() {
   auto *whitespace = check("Show whitespace", prefs.whitespace);
   auto *trim = check("Trim trailing whitespace when saving", prefs.trimOnSave);
   auto *newline = check("End files with a newline when saving", prefs.finalNewline);
+  auto *autoReload = check("Reload unmodified files changed on disk", prefs.autoReload);
   auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok |
                                        QDialogButtonBox::Cancel);
   form->addRow(buttons);
@@ -1584,6 +1578,7 @@ void Window::showPreferences() {
   prefs.whitespace = whitespace->isChecked();
   prefs.trimOnSave = trim->isChecked();
   prefs.finalNewline = newline->isChecked();
+  prefs.autoReload = autoReload->isChecked();
   prefs.store(settings);
   settings.sync();
   for (int i = 0; i < tabs->count(); ++i) {
@@ -2042,6 +2037,30 @@ void Window::rebuildOutline() {
   if (t->primary->send(SCI_GETLINECOUNT) > maxLines)
     outline->addItem("… outline limited to the first 50000 lines");
 }
+// Re-reads the tab's file (same encoding) and keeps the caret and scroll
+// position, which a plain setText would reset to the top.
+bool Window::reloadTab(EditorTab *t, QString &error) {
+  DocumentData d;
+  if (!DocumentData::read(t->data.path, d, error, t->data.encoding))
+    return false;
+  QScopedValueRollback<bool> quiet(suppressMacro, true);
+  auto *e = t->focused;
+  const sptr_t pos = e->send(SCI_GETCURRENTPOS);
+  const int line = int(e->send(SCI_LINEFROMPOSITION, pos)),
+            column = int(e->send(SCI_GETCOLUMN, pos)),
+            top = int(e->send(SCI_GETFIRSTVISIBLELINE));
+  t->data = d;
+  t->large = d.utf8.size() > largeFileSize;
+  t->setText(d.utf8);
+  dismissedChanges.remove(t);
+  applyLanguage(t, t->language);
+  const int lines = int(e->send(SCI_GETLINECOUNT));
+  const int newLine = qMin(line, lines - 1);
+  e->send(SCI_GOTOPOS, e->send(SCI_FINDCOLUMN, newLine, column));
+  e->send(SCI_SETFIRSTVISIBLELINE, qMin(top, lines - 1));
+  refresh();
+  return true;
+}
 void Window::checkDisk() {
   for (int i = 0; i < tabs->count(); ++i) {
     auto *t = static_cast<EditorTab *>(tabs->widget(i));
@@ -2065,6 +2084,18 @@ void Window::checkDisk() {
       t->data.stamp(); // touched, content identical
       dismissedChanges.remove(t);
       continue;
+    }
+    // A tab with no edits of its own simply follows the file.
+    // Only regular files of a size that does not freeze the UI: never a FIFO or
+    // device that replaced it, and never a huge file every 3 s.
+    if (prefs.autoReload && info.isFile() && info.size() <= largeFileSize &&
+        !t->dirty() && !t->large) {
+      QString error;
+      if (reloadTab(t, error)) {
+        statusBar()->showMessage(
+            "Reloaded " + info.fileName() + " (changed on disk)", 5000);
+        continue;
+      }
     }
     dismissedChanges.insert(t, state);
     statusBar()->showMessage(

@@ -29,7 +29,7 @@ struct Preferences {
   int fontSize = 11, tabWidth = 4;
   bool spaces = true, lineNumbers = true, caretLine = true, wrap = false,
        whitespace = false, autoIndent = true, completion = true,
-       trimOnSave = false, finalNewline = false;
+       trimOnSave = false, finalNewline = false, autoReload = true;
   int zoom = 0; // Scintilla zoom steps, shared by all views
   void load(const QSettings &s);
   void store(QSettings &s) const;
@@ -91,6 +91,7 @@ public:
   int findInFiles(const QString &folder, const QString &filters);
   void openResult(QTreeWidgetItem *item);
   void checkDisk();
+  bool reloadTab(EditorTab *t, QString &error);
   void snapshot();
   // The part of closing that follows the unsaved-changes prompts: `discarded`
   // are the tabs the user chose to discard.
