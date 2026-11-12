@@ -49,6 +49,7 @@ else()
   set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
       /usr/share/applications /usr/share/icons /usr/share/icons/hicolor
       /usr/share/icons/hicolor/scalable /usr/share/icons/hicolor/scalable/apps
+      /usr/share/icons/hicolor/16x16/apps /usr/share/icons/hicolor/16x16 /usr/share/icons/hicolor/22x22/apps /usr/share/icons/hicolor/22x22 /usr/share/icons/hicolor/24x24/apps /usr/share/icons/hicolor/24x24 /usr/share/icons/hicolor/32x32/apps /usr/share/icons/hicolor/32x32 /usr/share/icons/hicolor/48x48/apps /usr/share/icons/hicolor/48x48 /usr/share/icons/hicolor/64x64/apps /usr/share/icons/hicolor/64x64 /usr/share/icons/hicolor/128x128/apps /usr/share/icons/hicolor/128x128 /usr/share/icons/hicolor/256x256/apps /usr/share/icons/hicolor/256x256 /usr/share/icons/hicolor/512x512/apps /usr/share/icons/hicolor/512x512
       /usr/share/metainfo /usr/share/doc)
 endif()
 include(CPack)

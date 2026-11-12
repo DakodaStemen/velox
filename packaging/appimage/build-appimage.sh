@@ -13,5 +13,5 @@ export VERSION="$(sed -n 's/^VERSION *= *//p' "$here/velox.pro" | head -n1 | tr 
 export LINUXDEPLOY_OUTPUT_VERSION="$VERSION"
 "${LINUXDEPLOY:-linuxdeploy}" --appdir "$appdir" --plugin qt \
   --desktop-file "$appdir/usr/share/applications/io.github.DakodaStemen.Velox.desktop" \
-  --icon-file "$appdir/usr/share/icons/hicolor/scalable/apps/io.github.DakodaStemen.Velox.svg" \
+  --icon-file "$appdir/usr/share/icons/hicolor/256x256/apps/io.github.DakodaStemen.Velox.png" \
   --output appimage

@@ -49,6 +49,9 @@ isEmpty(VELOX_HARDENING): VELOX_HARDENING = ON
 }
 HEADERS += src/document.h src/window.h src/udleditor.h src/palette.h
 RESOURCES += resources.qrc
+# App icon: embedded in velox.exe (Windows) / copied into the .app (macOS).
+win32: RC_ICONS = packaging/windows/velox.ico
+macx: ICON = packaging/macos/Velox.icns
 INCLUDEPATH += src vendor/scintilla/include vendor/scintilla/src vendor/scintilla/qt/ScintillaEditBase vendor/lexilla/include
 # Both engines are linked statically so the installed binary is self-contained.
 LIBS += $$PWD/vendor/scintilla/bin/libScintillaEditBase.a $$PWD/vendor/lexilla/bin/liblexilla.a
@@ -60,8 +63,8 @@ data.path = $$PREFIX/share/velox
 data.files = share/langs.model.xml share/stylers.model.xml share/themes share/userDefineLangs
 desktop.path = $$PREFIX/share/applications
 desktop.files = packaging/io.github.DakodaStemen.Velox.desktop
-icon.path = $$PREFIX/share/icons/hicolor/scalable/apps
-icon.files = packaging/io.github.DakodaStemen.Velox.svg
+icon.path = $$PREFIX/share/icons
+icon.files = packaging/icons/hicolor
 metainfo.path = $$PREFIX/share/metainfo
 metainfo.files = packaging/io.github.DakodaStemen.Velox.metainfo.xml
 INSTALLS += target data desktop icon metainfo

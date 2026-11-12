@@ -6,6 +6,7 @@ All notable changes to this project are documented in this file. Versions follow
 ## [Unreleased]
 
 ### Changed
+- New app icon family: multi-size hicolor PNGs (16-512) plus a scalable SVG, a Windows `.ico` embedded in `velox.exe`, and a macOS `.icns` in the bundle. The window icon is built from embedded sizes so docks and taskbars render it crisp. Masters live in `packaging/icons/`; regenerate with `scripts/gen-icons.py` (needs `rsvg-convert` and Pillow).
 - Open tabs without unsaved edits now follow their file: when another program changes it on disk, the tab reloads in place (caret and scroll position kept) and the status bar says so. Tabs with unsaved edits are still only reported. Turn it off in Preferences ("Reload unmodified files changed on disk"). Devices, FIFOs and files over 32 MiB are never auto-read.
 
 ### Added

@@ -134,6 +134,7 @@ if(APPLE)
   if(EXISTS ${VELOX_MAC_ICON})
     set_source_files_properties(${VELOX_MAC_ICON} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
     list(APPEND VELOX_ICONS ${VELOX_MAC_ICON})
+    set(VELOX_MAC_ICON_FILE Velox.icns)
   endif()
 endif()
 # Test builds stay console apps on Windows so --self-test output is visible.
@@ -158,6 +159,7 @@ endif()
 set_target_properties(velox PROPERTIES
   MACOSX_BUNDLE_BUNDLE_NAME Velox
   MACOSX_BUNDLE_GUI_IDENTIFIER io.github.DakodaStemen.Velox
+  MACOSX_BUNDLE_ICON_FILE "${VELOX_MAC_ICON_FILE}"
   MACOSX_BUNDLE_BUNDLE_VERSION ${VELOX_VERSION}
   MACOSX_BUNDLE_SHORT_VERSION_STRING ${VELOX_VERSION}
   MACOSX_BUNDLE_COPYRIGHT "Copyright (C) 2026 The Velox Authors"
@@ -188,8 +190,9 @@ else()
   install(TARGETS velox RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT Runtime)
   install(FILES packaging/io.github.DakodaStemen.Velox.desktop
           DESTINATION ${CMAKE_INSTALL_DATADIR}/applications COMPONENT Runtime)
-  install(FILES packaging/io.github.DakodaStemen.Velox.svg
-          DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps COMPONENT Runtime)
+  # Every hicolor size (16..512 PNG) plus the scalable SVG.
+  install(DIRECTORY packaging/icons/hicolor
+          DESTINATION ${CMAKE_INSTALL_DATADIR}/icons COMPONENT Runtime)
   install(FILES packaging/io.github.DakodaStemen.Velox.metainfo.xml
           DESTINATION ${CMAKE_INSTALL_DATADIR}/metainfo COMPONENT Runtime)
 endif()

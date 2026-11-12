@@ -1,6 +1,13 @@
 <RCC>
   <qresource prefix="/">
-    <file alias="velox.svg">packaging/io.github.DakodaStemen.Velox.svg</file>
+    <file alias="icons/velox-16.png">packaging/icons/hicolor/16x16/apps/io.github.DakodaStemen.Velox.png</file>
+    <file alias="icons/velox-22.png">packaging/icons/hicolor/22x22/apps/io.github.DakodaStemen.Velox.png</file>
+    <file alias="icons/velox-24.png">packaging/icons/hicolor/24x24/apps/io.github.DakodaStemen.Velox.png</file>
+    <file alias="icons/velox-32.png">packaging/icons/hicolor/32x32/apps/io.github.DakodaStemen.Velox.png</file>
+    <file alias="icons/velox-48.png">packaging/icons/hicolor/48x48/apps/io.github.DakodaStemen.Velox.png</file>
+    <file alias="icons/velox-64.png">packaging/icons/hicolor/64x64/apps/io.github.DakodaStemen.Velox.png</file>
+    <file alias="icons/velox-128.png">packaging/icons/hicolor/128x128/apps/io.github.DakodaStemen.Velox.png</file>
+    <file alias="icons/velox-256.png">packaging/icons/hicolor/256x256/apps/io.github.DakodaStemen.Velox.png</file>
     <file alias="tab-close.svg">packaging/tab-close.svg</file>
   </qresource>
 </RCC>
