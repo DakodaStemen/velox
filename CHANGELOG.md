@@ -9,6 +9,7 @@ All notable changes to this project are documented in this file. Versions follow
 - Engineering baseline (2026-11-03): `Makefile` (`help setup lint test build ci`), `tests/scripts_test.sh` (6 checks of `scripts/check-version.sh` and `scripts/check-hardening.py`), `.markdownlint-cli2.jsonc`, `.pre-commit-config.yaml`, `docs/adr/` with ADR-0001, and a markdown lint job in CI.
 
 ### Changed
+- Word wrap (Alt+Z), Show whitespace and the zoom level are now remembered: they apply to every tab, including new ones, are saved to `settings.ini` and survive a restart. The View menu check marks follow Preferences and no longer go stale when switching tabs.
 - CI: `timeout-minutes` on every job. Dependabot: 7-day cooldown.
 
 ### Added

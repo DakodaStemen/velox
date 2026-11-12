@@ -30,6 +30,7 @@ struct Preferences {
   bool spaces = true, lineNumbers = true, caretLine = true, wrap = false,
        whitespace = false, autoIndent = true, completion = true,
        trimOnSave = false, finalNewline = false;
+  int zoom = 0; // Scintilla zoom steps, shared by all views
   void load(const QSettings &s);
   void store(QSettings &s) const;
 };
@@ -100,6 +101,9 @@ public:
   static qint64 recoveryPid(const QString &fileName); // 0 when not ours
   static bool trustedRecoveryFile(const QString &path);
   void refresh();
+  void applyViewPreferences();
+  void zoomChanged(int level);
+  QAction *wrapAction = nullptr, *whitespaceAction = nullptr;
   void rebuildOutline();
   void stopSearch();
   QListWidget *outline;
