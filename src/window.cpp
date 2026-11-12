@@ -200,6 +200,7 @@ void Preferences::load(const QSettings &s) {
   completion = s.value("editor/completion", d.completion).toBool();
   trimOnSave = s.value("save/trimTrailingWhitespace", d.trimOnSave).toBool();
   finalNewline = s.value("save/finalNewline", d.finalNewline).toBool();
+  zoom = qBound(-10, s.value("view/zoom", d.zoom).toInt(), 20);
 }
 void Preferences::store(QSettings &s) const {
   s.setValue("editor/font", font);
@@ -214,6 +215,7 @@ void Preferences::store(QSettings &s) const {
   s.setValue("editor/completion", completion);
   s.setValue("save/trimTrailingWhitespace", trimOnSave);
   s.setValue("save/finalNewline", finalNewline);
+  s.setValue("view/zoom", zoom);
 }
 EditorTab::EditorTab(QWidget *parent) : QWidget(parent) {
   auto *layout = new QVBoxLayout(this);
@@ -703,34 +705,22 @@ void Window::buildMenus() {
     if (current())
       current()->toggleSplit();
   });
-  action(
+  wrapAction = action(
       v, "Word wrap", QKeySequence("Alt+Z"),
       [this] {
-        auto *t = current();
-        if (t) {
-          int mode = t->focused->send(SCI_GETWRAPMODE) == SC_WRAP_NONE
-                         ? SC_WRAP_WORD
-                         : SC_WRAP_NONE;
-          for (auto *ed : {t->primary, t->secondary})
-            ed->send(SCI_SETWRAPMODE, mode);
-        }
+        prefs.wrap = wrapAction->isChecked();
+        applyViewPreferences();
       },
-      true)
-      ->setChecked(prefs.wrap);
-  action(
+      true);
+  wrapAction->setChecked(prefs.wrap);
+  whitespaceAction = action(
       v, "Show whitespace", {},
       [this] {
-        auto *t = current();
-        if (t) {
-          int mode = t->focused->send(SCI_GETVIEWWS) == SCWS_INVISIBLE
-                         ? SCWS_VISIBLEALWAYS
-                         : SCWS_INVISIBLE;
-          for (auto *ed : {t->primary, t->secondary})
-            ed->send(SCI_SETVIEWWS, mode);
-        }
+        prefs.whitespace = whitespaceAction->isChecked();
+        applyViewPreferences();
       },
-      true)
-      ->setChecked(prefs.whitespace);
+      true);
+  whitespaceAction->setChecked(prefs.whitespace);
   action(v, "Zoom in", QKeySequence::ZoomIn, [this] { send(SCI_ZOOMIN); });
   action(v, "Zoom out", QKeySequence::ZoomOut, [this] { send(SCI_ZOOMOUT); });
   action(v, "Reset zoom", QKeySequence("Ctrl+0"),
@@ -889,6 +879,8 @@ EditorTab *Window::newDocument(const QByteArray &text) {
       refresh();
     });
     connect(ed, &ScintillaEditBase::updateUi, this, [this] { refresh(); });
+    connect(ed, &ScintillaEditBase::zoom, this,
+            [this, ed](int) { zoomChanged(int(ed->send(SCI_GETZOOM))); });
     connect(ed, &ScintillaEditBase::notifyChange, this,
             [this] { outlineTimer.start(700); });
     connect(ed, &ScintillaEditBase::marginClicked, this,
@@ -1513,7 +1505,34 @@ void Window::applyPreferences(EditorTab *t) {
     // Wrapping a huge document makes every edit and scroll slow.
     e->send(SCI_SETWRAPMODE, prefs.wrap && !t->large ? SC_WRAP_WORD : SC_WRAP_NONE);
     e->send(SCI_SETVIEWWS, prefs.whitespace ? SCWS_VISIBLEALWAYS : SCWS_INVISIBLE);
+    e->send(SCI_SETZOOM, prefs.zoom);
   }
+}
+// Applies and saves the View menu toggles (word wrap, whitespace) for every
+// tab, so new tabs and the next launch keep them.
+void Window::applyViewPreferences() {
+  for (int i = 0; i < tabs->count(); ++i)
+    applyPreferences(static_cast<EditorTab *>(tabs->widget(i)));
+  if (wrapAction)
+    wrapAction->setChecked(prefs.wrap);
+  if (whitespaceAction)
+    whitespaceAction->setChecked(prefs.whitespace);
+  prefs.store(settings);
+}
+// Ctrl+wheel, Zoom in/out and Reset zoom all end up here: one zoom level for
+// every view, remembered across tabs and restarts.
+void Window::zoomChanged(int level) {
+  level = qBound(-10, level, 20);
+  if (level == prefs.zoom)
+    return;
+  prefs.zoom = level;
+  for (int i = 0; i < tabs->count(); ++i) {
+    auto *t = static_cast<EditorTab *>(tabs->widget(i));
+    for (auto *e : {t->primary, t->secondary})
+      if (e->send(SCI_GETZOOM) != level)
+        e->send(SCI_SETZOOM, level);
+  }
+  prefs.store(settings);
 }
 void Window::showPreferences() {
   QDialog dialog(this);
@@ -1572,6 +1591,8 @@ void Window::showPreferences() {
     applyPreferences(t);
     applyTheme(t);
   }
+  wrapAction->setChecked(prefs.wrap);
+  whitespaceAction->setChecked(prefs.whitespace);
 }
 void Window::refresh() {
   auto *t = current();

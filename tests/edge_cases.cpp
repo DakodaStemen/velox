@@ -975,6 +975,50 @@ private slots:
     w.applyPreferences(t);
     QCOMPARE(at(t, SCI_GETWRAPMODE), sptr_t(SC_WRAP_NONE));
   }
+  void viewTogglesAndZoomPersist() {
+    QSettings(configPath("settings.ini"), QSettings::IniFormat).clear();
+    {
+      Window w(true);
+      auto *a = w.newDocument("one\n");
+      QVERIFY(trigger(w, "Word wrap"));
+      QVERIFY(trigger(w, "Show whitespace"));
+      QCOMPARE(at(a, SCI_GETWRAPMODE), sptr_t(SC_WRAP_WORD));
+      QCOMPARE(at(a, SCI_GETVIEWWS), sptr_t(SCWS_VISIBLEALWAYS));
+      a->primary->send(SCI_ZOOMIN);
+      a->primary->send(SCI_ZOOMIN);
+      QCOMPARE(w.prefs.zoom, 2);
+      // A tab opened later inherits all three, and the zoom reaches other tabs.
+      auto *b = w.newDocument("two\n");
+      QCOMPARE(at(b, SCI_GETWRAPMODE), sptr_t(SC_WRAP_WORD));
+      QCOMPARE(at(b, SCI_GETZOOM), sptr_t(2));
+      b->primary->send(SCI_ZOOMOUT);
+      QCOMPARE(at(a, SCI_GETZOOM), sptr_t(1));
+      QCOMPARE(at(a, SCI_GETWRAPMODE), sptr_t(SC_WRAP_WORD));
+    }
+    {
+      // The next launch starts with the saved view.
+      Window w(true);
+      auto *t = w.newDocument("x\n");
+      QCOMPARE(at(t, SCI_GETWRAPMODE), sptr_t(SC_WRAP_WORD));
+      QCOMPARE(at(t, SCI_GETVIEWWS), sptr_t(SCWS_VISIBLEALWAYS));
+      QCOMPARE(at(t, SCI_GETZOOM), sptr_t(1));
+      QVERIFY(trigger(w, "Reset zoom"));
+      QVERIFY(trigger(w, "Word wrap"));
+      QVERIFY(trigger(w, "Show whitespace"));
+    }
+    Window w(true);
+    auto *t = w.newDocument("x\n");
+    QCOMPARE(at(t, SCI_GETWRAPMODE), sptr_t(SC_WRAP_NONE));
+    QCOMPARE(at(t, SCI_GETZOOM), sptr_t(0));
+    QCOMPARE(at(t, SCI_GETVIEWWS), sptr_t(SCWS_INVISIBLE));
+    // A hand-edited out-of-range zoom is clamped, not trusted.
+    QSettings s(configPath("settings.ini"), QSettings::IniFormat);
+    s.setValue("view/zoom", 9999);
+    Preferences p;
+    p.load(s);
+    QCOMPARE(p.zoom, 20);
+    s.clear();
+  }
   void findInFilesHonoursChosenEncoding() {
     QTemporaryDir dir;
     put(dir.filePath("latin.txt"), QByteArray("caf\xe9 au lait\n"));
