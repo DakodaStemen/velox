@@ -752,11 +752,72 @@ private slots:
     QVERIFY(!w.save(w.current()));
 #endif
   }
+  void cleanTabsFollowTheFileAndKeepTheirPlace() {
+    QTemporaryDir dir;
+    QString p = dir.filePath("auto.txt");
+    QByteArray body;
+    for (int i = 0; i < 200; ++i)
+      body += "line " + QByteArray::number(i) + "\n";
+    put(p, body);
+    Window w(true);
+    QVERIFY(w.openFile(p));
+    auto *t = w.current();
+    t->primary->send(SCI_GOTOLINE, 120);
+    QTest::qWait(20);
+    put(p, body + "appended elsewhere\n");
+    w.checkDisk();
+    QVERIFY(t->text().endsWith("appended elsewhere\n"));
+    QVERIFY(!t->dirty());
+    QCOMPARE(at(t, SCI_LINEFROMPOSITION, at(t, SCI_GETCURRENTPOS)), sptr_t(120));
+    QVERIFY(w.statusBar()->currentMessage().startsWith("Reloaded auto.txt"));
+    // A save right after is not seen as a conflict.
+    QVERIFY(w.save(t));
+    // A tab with unsaved edits is never overwritten: it is only reported.
+    t->primary->send(SCI_APPENDTEXT, 4, reinterpret_cast<sptr_t>("mine"));
+    QTest::qWait(20);
+    put(p, "someone else, much longer than before\n");
+    w.statusBar()->clearMessage();
+    w.checkDisk();
+    QVERIFY(t->text().endsWith("mine"));
+    QVERIFY(w.statusBar()->currentMessage().startsWith("auto.txt changed"));
+    // The preference turns it off.
+    QString error;
+    QVERIFY(w.reloadTab(t, error));
+    t->primary->send(SCI_SETSAVEPOINT);
+    w.prefs.autoReload = false;
+    QTest::qWait(20);
+    put(p, "third version, longer again\n");
+    w.statusBar()->clearMessage();
+    w.checkDisk();
+    QVERIFY(w.statusBar()->currentMessage().startsWith("auto.txt changed"));
+    QCOMPARE(t->text(), QByteArray("someone else, much longer than before\n"));
+  }
+  void autoReloadSkipsDevicesAndDeletedFiles() {
+#ifdef Q_OS_UNIX
+    QTemporaryDir dir;
+    QString p = dir.filePath("gone.txt");
+    put(p, "one\n");
+    Window w(true);
+    QVERIFY(w.openFile(p));
+    auto *t = w.current();
+    QVERIFY(QFile::remove(p));
+    w.checkDisk();
+    QCOMPARE(t->text(), QByteArray("one\n")); // kept, reported
+    QVERIFY(w.statusBar()->currentMessage().startsWith("gone.txt changed"));
+    QVERIFY(::symlink("/dev/zero", QFile::encodeName(p)) == 0);
+    QElapsedTimer clock;
+    clock.start();
+    w.checkDisk();
+    QVERIFY(clock.elapsed() < 2000);
+    QCOMPARE(t->text(), QByteArray("one\n"));
+#endif
+  }
   void externalChangeReportedOnceUntilDiskChangesAgain() {
     QTemporaryDir dir;
     QString p = dir.filePath("r.txt");
     put(p, "one\n");
     Window w(true);
+    w.prefs.autoReload = false;
     QVERIFY(w.openFile(p));
     auto *t = w.current();
     QTest::qWait(20);

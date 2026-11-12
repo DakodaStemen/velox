@@ -21,7 +21,7 @@
 - **Editing power.** Multiple cursors, rectangular selection (Alt+drag), line ending conversion, bookmarks, macro recording and playback, comment toggling, line sorting, de-duplication, joining and moving.
 - **Large files.** Files up to 1 GiB open; above 32 MiB highlighting, folding and the outline are switched off to stay responsive.
 - **Preferences.** Font, tab width, spaces or tabs, line numbers, wrapping, and optional trailing-whitespace trimming and final newline on save (Edit → Preferences).
-- **Never lose work.** Unsaved text is snapshotted every few seconds and restored after a crash. Changes made to open files by other programs are detected.
+- **Never lose work.** Unsaved text is snapshotted every few seconds and restored after a crash. Changes made to open files by other programs are detected; tabs without unsaved edits reload automatically.
 - **One window.** Running `velox file.txt` while Velox is open adds a tab to the existing window.
 
 ## At a glance
